@@ -35,7 +35,7 @@
     "ioredis": "5.7.0",
     "jsonwebtoken": "9.0.2",
     "langchain": "0.3.35",
-    "lodash": "^4.17.21",
+    "lodash": "^4.17.23",
     "lru-cache": "^11.1.0",
     "moment-timezone": "0.6.0",
     "mongoose": "8.9.1",
