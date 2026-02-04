@@ -19,8 +19,8 @@ export class SessionService {
     // await this.sessionDBService.deleteAllSessionForUserId(user._id);
     const jsonBody = { _id: user._id };
 
-    const sessionToken = sign(jsonBody, SECRET_KEY, { expiresIn: `${this.sessionExpiryHours}h` });
-    const refreshToken = sign(jsonBody, SECRET_KEY, { expiresIn: `${this.refreshTokenExpiryDays}d` });
+    const sessionToken = sign({ ...jsonBody, tokenType: 'sessionToken' }, SECRET_KEY, { expiresIn: `${this.sessionExpiryHours}h` });
+    const refreshToken = sign({ ...jsonBody, tokenType: 'refreshToken' }, SECRET_KEY, { expiresIn: `${this.refreshTokenExpiryDays}d` });
     const now = new Date();
     const expiresAt = new Date(now.getTime() + this.sessionExpiryHours * 60 * 60 * 1000);
     const refreshExpiresAt = new Date(now.getTime() + this.refreshTokenExpiryDays * 24 * 60 * 60 * 1000);
