@@ -51,7 +51,7 @@
     "winston-daily-rotate-file": "4.7.1",
     "@swc/cli": "0.1.57",
     "@swc/core": "1.2.220",
-    "pm2": "6.0.8"
+    "pm2": "6.0.14"
   },
   "devDependencies": {
     "@types/bcrypt": "5.0.0",
