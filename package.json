@@ -16,7 +16,7 @@
     "deploy:dev": "pm2 start ecosystem.config.js --only dev"
   },
   "dependencies": {
-    "@langchain/community": "1.1.15",
+    "@langchain/community": "1.1.18",
     "@langchain/core": "1.1.24",
     "@langchain/openai": "1.2.7",
     "@swc/cli": "0.8.0",
