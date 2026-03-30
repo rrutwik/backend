@@ -82,7 +82,7 @@
     "nodemon": "2.0.19",
     "prettier": "2.7.1",
     "supertest": "6.2.4",
-    "ts-jest": "28.0.7",
+    "ts-jest": "29.4.6",
     "ts-node": "10.9.2",
     "tsc-alias": "1.7.0",
     "tsconfig-paths": "4.0.0",
