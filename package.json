@@ -7,7 +7,7 @@
   "scripts": {
     "start": "npm run build && cross-env NODE_ENV=production node dist/server.js",
     "dev": "cross-env NODE_ENV=development nodemon",
-    "build": "swc src -d dist --source-maps --copy-files",
+    "build": "swc src -d dist --source-maps --copy-files --strip-leading-paths",
     "build:tsc": "tsc && tsc-alias",
     "test": "jest --forceExit --detectOpenHandles",
     "lint": "eslint --ignore-path .gitignore --ext .ts src/",
@@ -20,7 +20,7 @@
     "@langchain/core": "1.1.24",
     "@langchain/openai": "1.2.7",
     "@swc/cli": "0.8.0",
-    "@swc/core": "1.2.220",
+    "@swc/core": "1.15.21",
     "axios": "1.13.5",
     "bcrypt": "6.0.0",
     "chatgpt": "5.2.5",
