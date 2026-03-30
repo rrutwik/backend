@@ -26,6 +26,7 @@ class HybridCache {
     });
 
     this.redis = new Redis(redisUrl, {
+      db: 0,
       maxRetriesPerRequest: null,
       enableReadyCheck: true,
     });
