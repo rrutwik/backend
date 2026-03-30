@@ -7,7 +7,7 @@ import { ChatPromptTemplate, HumanMessagePromptTemplate, MessagesPlaceholder, Sy
 import { OPENAI_KEY, OPENAI_MODEL_NAME, MAXIMUM_CHAT_BUFFER } from "@/config";
 import Redis from "ioredis";
 import { RedisCache } from "@langchain/community/caches/ioredis";
-import { sha256 } from "@langchain/core/utils/hash/sha256";
+import { sha256 } from "@langchain/core/utils/hash";
 import { ChatBot } from "@/interfaces/chatbot.interface";
 import { throttle } from 'lodash';
 import { concat } from "@langchain/core/utils/stream";
