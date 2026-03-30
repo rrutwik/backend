@@ -39,4 +39,4 @@ const UserProfileSchema: Schema = new Schema({
 });
 
 export const UserProfileModel = model<UserProfile & Document>('user_profile', UserProfileSchema);
-UserProfileModel.syncIndexes();
+UserProfileModel.syncIndexes({ background: true });;

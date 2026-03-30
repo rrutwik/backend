@@ -19,6 +19,7 @@ export interface GameState {
 export interface ChessGame {
   _id?: string;
   game_id: string;
+  is_vs_bot: boolean;
   player_white: string | ObjectId;
   player_black: string | ObjectId;
   game_state: GameState;

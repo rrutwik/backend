@@ -41,4 +41,4 @@ UserSchema.set("toJSON", {
 });
 
 export const UserModel = model<User & Document>('user', UserSchema);
-UserModel.syncIndexes();
+UserModel.syncIndexes({ background: true });;

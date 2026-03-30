@@ -80,4 +80,4 @@ const ChatSessionSchema: Schema = new Schema({
 }, { timestamps: true });
 
 export const ChatSessionModel = model<ChatSession & Document>('chat_session', ChatSessionSchema);
-ChatSessionModel.syncIndexes();
+ChatSessionModel.syncIndexes({ background: true });;

@@ -49,6 +49,11 @@ const ChessGameSchema: Schema = new Schema({
     unique: true,
     index: true
   },
+  is_vs_bot: {
+    type: Boolean,
+    required: true,
+    default: false
+  },
   player_white: {
     type: Schema.Types.ObjectId,
     required: false,
@@ -85,6 +90,6 @@ const ChessGameSchema: Schema = new Schema({
 // Add index for finding active games for a player
 ChessGameSchema.index({ player_white: 1, 'game_state.status': 1 });
 ChessGameSchema.index({ player_black: 1, 'game_state.status': 1 });
-
+ChessGameSchema.index({ createdAt: -1 });
 export const ChessGameModel = model<ChessGame & Document>('chess_game', ChessGameSchema);
-ChessGameModel.syncIndexes();
+ChessGameModel.syncIndexes({ background: true });

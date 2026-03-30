@@ -5,9 +5,28 @@ import { HttpException } from '@/exceptions/HttpException';
 import { logger } from '@/utils/logger';
 import mongoose from 'mongoose';
 import { TextEncoder } from 'util';
+import { Guest } from '@/interfaces/guest.interface';
+import { GuestModel } from '@/models/guest.model';
+import { v4 as uuidv4 } from 'uuid';
+import { UserModel } from '@/models/user.model';
+import { User } from '@/interfaces/users.interface';
 
 @Service()
 export class ChessService {
+
+  public async createGuestSession(metadata: Record<string, any>): Promise<Guest> {
+    try {
+      const guestSession = await GuestModel.create({
+        session_uuid: uuidv4(),
+        metadata,
+      });
+      logger.info(`Guest session created: ${guestSession.session_uuid}`);
+      return guestSession.toJSON();
+    } catch (error) {
+      logger.error('Error creating guest session:', error);
+      throw error;
+    }
+  }
 
   private async createUniqueGameId(creatorId: string): Promise<string> {
     const data = `${creatorId}-${Date.now()}-${Math.random()}`;
@@ -21,16 +40,20 @@ export class ChessService {
     return hashHex.slice(0, 12).toUpperCase();
   }
 
-  public async createGame(playerId: string, playerColor: 'white' | 'black'): Promise<ChessGame> {
+  public async createGame(playerId: string, playerColor: 'white' | 'black', isVsBot: boolean = false): Promise<ChessGame> {
     try {
+      if (!playerId) {
+        throw new HttpException(400, 'Player ID is required to create a game');
+      }
       const game = await ChessGameModel.create({
         game_id: await this.createUniqueGameId(playerId),
         player_white: playerColor === 'white' ? playerId : null,
         player_black: playerColor === 'black' ? playerId : null,
+        is_vs_bot: isVsBot,
         game_state: {
           fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
           turn: 'white',
-          status: 'waiting_for_opponent',
+          status: isVsBot ? 'active' : 'waiting_for_opponent',
           moves: []
         }
       });
@@ -43,20 +66,31 @@ export class ChessService {
     }
   }
 
-  public async registerOpponent(gameId: string, opponentId: string): Promise<ChessGame> {
+  private async checkIfCanRegister(game: ChessGame, user?: User, guest?: Guest): Promise<boolean> {
+    const isGameOfUser = (await UserModel.findOne({
+      $or: [
+        { _id: game.player_white },
+        { _id: game.player_black }
+      ]
+    })) ? true : false;
+    return (user && isGameOfUser) || (guest && true);
+  }
+
+  public async registerOpponent(gameId: string, user?: User, guest?: Guest): Promise<ChessGame> {
     try {
       const game = await ChessGameModel.findOne({ game_id: gameId });
-      if (!game) {
+      if (!game || (!user && !guest) || !await this.checkIfCanRegister(game, user, guest)) {
         throw new HttpException(404, 'Chess game not found');
       }
 
       // Check if game is waiting for opponent
-      if (game.game_state.status !== 'waiting_for_opponent') {
+      if (game.is_vs_bot || game.game_state.status !== 'waiting_for_opponent') {
         throw new HttpException(400, 'Game is not waiting for an opponent');
       }
 
       // Check if opponent is trying to join their own game
       const creatorId = game.player_white || game.player_black;
+      const opponentId = user?._id.toString() || guest?._id.toString();
       if (creatorId?.toString() === opponentId) {
         throw new HttpException(400, 'Cannot join your own game as opponent');
       }
@@ -120,7 +154,7 @@ export class ChessService {
           { player_black: playerId }
         ],
         'game_state.status': { $in: ['waiting_for_opponent', 'active'] }
-      }).sort({ updated_at: -1 });
+      }).sort({ updatedAt: -1 });
 
       return games.map(game => game.toJSON());
     } catch (error) {
@@ -129,7 +163,7 @@ export class ChessService {
     }
   }
 
-  public async updateGameState(gameId: string, version: number, gameState: GameState, currentPlayerId: string): Promise<ChessGame> {
+  public async updateGameState(gameId: string, version: number, gameState: GameState, user: User, guest: Guest): Promise<ChessGame> {
     try {
       const gameModel = await ChessGameModel.findOne({ game_id: gameId, version });
       if (!gameModel) {
@@ -141,16 +175,20 @@ export class ChessService {
       }
 
       // Verify the current player is part of this game
+      const currentPlayerId = user?._id.toString() || guest?._id.toString();
       const isPlayerWhite = game.player_white?.toString() === currentPlayerId;
       const isPlayerBlack = game.player_black?.toString() === currentPlayerId;
-      if (!isPlayerWhite && !isPlayerBlack) {
+      const isAnyPlayer = game.player_white?.toString() === currentPlayerId || game.player_black?.toString() === currentPlayerId;
+      if (!game.is_vs_bot && !isPlayerWhite && !isPlayerBlack) {
         throw new HttpException(403, 'You are not a player in this game');
       }
-
+      if (game.is_vs_bot && !isAnyPlayer) {
+        throw new HttpException(403, 'You are not a player in this game');
+      }
       // Verify it's the player's turn
       const expectedTurn = game.game_state.turn;
       const playerColor = isPlayerWhite ? 'white' : 'black';
-      if (expectedTurn !== playerColor) {
+      if (expectedTurn !== playerColor && !game.is_vs_bot) {
         throw new HttpException(400, `It's not your turn. Current turn: ${expectedTurn}`);
       }
       // Perform atomic update with version increment

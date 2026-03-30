@@ -2,10 +2,12 @@ import { NextFunction, Response } from 'express';
 import { verify, TokenExpiredError } from 'jsonwebtoken';
 import { SECRET_KEY } from '@config';
 import { HttpException } from '@exceptions/HttpException';
-import { DataStoredInToken, RequestWithUser } from '@interfaces/auth.interface';
+import { DataStoredInToken, RequestWithGuest, RequestWithUser } from '@interfaces/auth.interface';
 import { logger } from '@/utils/logger';
 import { UserService } from '@/services/users.service';
 import { SessionDBService } from '@/dbservice/session';
+import { GuestModel } from '@/models/guest.model';
+import { cache } from '@/cache';
 
 const getAuthorization = (req: RequestWithUser) => {
   const cookie = req.cookies['Authorization'];
@@ -18,6 +20,10 @@ const getAuthorization = (req: RequestWithUser) => {
 }
 
 export const AuthMiddleware = async (req: RequestWithUser, res: Response, next: NextFunction) => {
+  if (req.guest) {
+    logger.info('Guest session detected, skipping authentication middleware');
+    return next();
+  }
   const userService = new UserService();
   const sessionDBService = new SessionDBService();
 
@@ -57,4 +63,26 @@ export const AuthMiddleware = async (req: RequestWithUser, res: Response, next: 
     return next(new HttpException(401, 'Wrong authentication token'));
   }
 };
+
+export const GuestMiddleware = async (req: RequestWithGuest, res: Response, next: NextFunction) => {
+  try {
+    const token = req.headers['x-guest-token'] as string;
+    if (token) {
+      const guest = await GuestModel.findOne({ session_uuid: token });
+      if (guest) {
+        req.guest = guest; // No user associated with guest session
+        return next();
+      } else {
+        logger.error(`Guest session not found for token: ${token}`);
+        return next(new HttpException(401, 'Unexpected error occurred'));
+      }
+    }
+    logger.error('Guest token not found in headers');
+    return next(new HttpException(401, 'Unexpected error occurred'));
+  } catch (error) {
+    logger.info(`Error in guest middleware: ${error}`);
+    logger.error(error);
+    return next(new HttpException(401, 'Unexpected error occurred'));
+  }
+}
 

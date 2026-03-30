@@ -42,4 +42,4 @@ const PaymentModelSchema = new Schema({
 }, { timestamps: true });
 
 export const PaymentModel = model<Payment & Document>('payment', PaymentModelSchema);
-PaymentModel.syncIndexes();
+PaymentModel.syncIndexes({ background: true });;

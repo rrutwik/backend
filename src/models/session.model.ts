@@ -28,4 +28,4 @@ const SessionSchema: Schema = new Schema({
 }, { timestamps: true });
 
 export const SessionModel = model<Session & Document>('session', SessionSchema);
-SessionModel.syncIndexes();
+SessionModel.syncIndexes({ background: true });;

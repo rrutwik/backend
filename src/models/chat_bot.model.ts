@@ -33,4 +33,4 @@ const ChatBotSchema: Schema = new Schema({
 }, { timestamps: true });
 
 export const ChatBotModel = model<ChatBot & Document>('chatbot', ChatBotSchema);
-ChatBotModel.syncIndexes();
+ChatBotModel.syncIndexes({ background: true });;

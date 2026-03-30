@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { ChessController } from '@/controllers/chess.controller';
 import { Routes } from '@interfaces/routes.interface';
-import { AuthMiddleware } from '@/middlewares/auth.middleware';
+import { AuthMiddleware, GuestMiddleware } from '@/middlewares/auth.middleware';
 
 export class ChessRoute implements Routes {
   public path = '/chess/';
@@ -13,15 +13,17 @@ export class ChessRoute implements Routes {
   }
 
   private initializeRoutes() {
-    this.router.post(`${this.path}create`, AuthMiddleware, this.chess.createGame);
+    this.router.post(`/guest-session`, this.chess.createGuestSession);
+  
+    this.router.post(`${this.path}create`, GuestMiddleware, AuthMiddleware, this.chess.createGame);
 
-    this.router.put(`${this.path}game/:gameId/join`, AuthMiddleware, this.chess.registerOpponent);
+    this.router.put(`${this.path}game/:gameId/join`, GuestMiddleware, AuthMiddleware, this.chess.registerOpponent);
 
-    this.router.get(`${this.path}game/:gameId`, AuthMiddleware, this.chess.getGame);
+    this.router.get(`${this.path}game/:gameId`, GuestMiddleware, AuthMiddleware, this.chess.getGame);
 
     this.router.get(`${this.path}active`, AuthMiddleware, this.chess.getActiveGames);
 
-    this.router.put(`${this.path}game/:gameId/state`, AuthMiddleware, this.chess.updateGameState);
+    this.router.put(`${this.path}game/:gameId/state`, GuestMiddleware, AuthMiddleware, this.chess.updateGameState);
 
     this.router.put(`${this.path}game/:gameId/end`, AuthMiddleware, this.chess.endGame);
 

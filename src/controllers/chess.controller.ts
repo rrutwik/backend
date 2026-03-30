@@ -4,24 +4,51 @@ import { ChessService } from '@/services/chess.service';
 import { Container } from 'typedi';
 import { logger } from '@/utils/logger';
 import { GameState } from '@/interfaces/chessgame.interface';
+import { Guest } from '@/interfaces/guest.interface';
 
 export class ChessController {
   private chessService = Container.get(ChessService);
 
+  public createGuestSession = async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const metadata = {
+        ip: req.ip,
+        ips: req.ips || [],
+        userAgent: req.get('User-Agent') || 'unknown',
+        referer: req.get('Referer') || null,
+        origin: req.get('Origin') || null,
+        acceptLanguage: req.get('Accept-Language') || null,
+        ...req.body
+      };
+      const guestSession = await this.chessService.createGuestSession(metadata);
+
+      return res.status(200).json({
+        message: 'Guest session created successfully',
+        _id: guestSession._id,
+        token: guestSession.session_uuid
+      });
+    } catch (error) {
+      logger.error('Error creating guest session:', error);
+      next(error);
+    }
+  }
+
   public createGame = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const user: any = req.user;
+      const guest: Guest = req.guest;
       const { color } = req.body;
 
-      if (!user) {
+      if (!user && !guest) {
         return res.status(401).json({ message: 'User not authenticated' });
       }
 
       if (!color || !['white', 'black'].includes(color)) {
         return res.status(400).json({ message: 'Valid color is required (white or black)' });
       }
-
-      const game = await this.chessService.createGame(user._id.toString(), color);
+      const isVsBot = req.body.is_vs_bot === true;
+      console.log(`isVsBot: ${isVsBot} typof isVsBot: ${typeof isVsBot}`);
+      const game = await this.chessService.createGame(user?._id ? user._id.toString() : guest._id.toString(), color, isVsBot);
 
       return res.status(201).json({
         message: 'Chess game created successfully',
@@ -36,17 +63,24 @@ export class ChessController {
   public registerOpponent = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const user: any = req.user;
+      const guest: Guest = req.guest;
       const { gameId } = req.params;
-
-      if (!user) {
+      console.log({
+        user,
+        guest
+      })
+      if (!user && !guest) {
         return res.status(401).json({ message: 'User not authenticated' });
       }
-
+      console.log({
+        user,
+        guest
+      })
       if (!gameId) {
         return res.status(400).json({ message: 'Game ID is required' });
       }
 
-      const game = await this.chessService.registerOpponent(gameId, user._id.toString());
+      const game = await this.chessService.registerOpponent(gameId, user, guest);
 
       return res.status(200).json({
         message: 'Successfully registered as opponent',
@@ -61,9 +95,10 @@ export class ChessController {
   public getGame = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const user: any = req.user;
+      const guest: Guest = req.guest;
       const { gameId } = req.params;
 
-      if (!user) {
+      if (!user && !guest) {
         return res.status(401).json({ message: 'User not authenticated' });
       }
 
@@ -74,7 +109,7 @@ export class ChessController {
       const game = await this.chessService.getGameById(gameId);
 
       // Verify the user is part of this game
-      const isPlayer = game.player_white?.toString() === user._id.toString() || game.player_black?.toString() === user._id.toString();
+      const isPlayer = game.player_white?.toString() === user?._id.toString() || game.player_black?.toString() === user?._id.toString() || (guest && (game.player_white?.toString() === guest?._id.toString() || game.player_black?.toString() === guest?._id.toString()));
       const status = game.game_state.status;
   
       if (!isPlayer && status !== 'waiting_for_opponent') {
@@ -115,10 +150,12 @@ export class ChessController {
   public updateGameState = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const user: any = req.user;
+      const guest: Guest = req.guest;
+    
       const { gameId } = req.params;
       const { game_state: gameState, version } = req.body as { game_state: GameState; version: number };
 
-      if (!user) {
+      if (!user && !guest) {
         return res.status(401).json({ message: 'User not authenticated' });
       }
 
@@ -130,7 +167,7 @@ export class ChessController {
         return res.status(400).json({ message: 'Game state is required' });
       }
 
-      const updatedGame = await this.chessService.updateGameState(gameId, version, gameState, user._id.toString());
+      const updatedGame = await this.chessService.updateGameState(gameId, version, gameState, user, guest);
 
       return res.status(200).json({
         message: 'Game state updated successfully',

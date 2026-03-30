@@ -1,5 +1,6 @@
 import { Request } from 'express';
 import { User } from '@interfaces/users.interface';
+import { Guest } from './guest.interface';
 
 export interface DataStoredInToken {
   _id: string;
@@ -18,6 +19,11 @@ export interface UpdateProfileRequest extends RequestWithUser {
 
 export interface RequestWithUser extends Request {
   user: User;
+  guest?: Guest;
+}
+
+export interface RequestWithGuest extends Request {
+  guest: Guest;
 }
 
 export interface HandleMessageRequest extends RequestWithUser {
