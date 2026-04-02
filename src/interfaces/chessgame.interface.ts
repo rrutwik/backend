@@ -8,6 +8,7 @@ export interface GameState {
   winner?: 'white' | 'black' | 'draw';
   moves?: string[];
   current_card?: string;
+  current_cards?: string[];
   check_attempts?: number;
   cards_deck?: {
     suit: string;
@@ -20,6 +21,7 @@ export interface ChessGame {
   _id?: string;
   game_id: string;
   is_vs_bot: boolean;
+  cards_to_draw: number;
   player_white: string | ObjectId;
   player_black: string | ObjectId;
   game_state: GameState;

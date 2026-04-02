@@ -40,7 +40,7 @@ export class ChessService {
     return hashHex.slice(0, 12).toUpperCase();
   }
 
-  public async createGame(playerId: string, playerColor: 'white' | 'black', isVsBot: boolean = false): Promise<ChessGame> {
+  public async createGame(playerId: string, playerColor: 'white' | 'black', isVsBot: boolean = false, cardsToDraw: number = 1): Promise<ChessGame> {
     try {
       if (!playerId) {
         throw new HttpException(400, 'Player ID is required to create a game');
@@ -50,6 +50,7 @@ export class ChessService {
         player_white: playerColor === 'white' ? playerId : null,
         player_black: playerColor === 'black' ? playerId : null,
         is_vs_bot: isVsBot,
+        cards_to_draw: cardsToDraw,
         game_state: {
           fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
           turn: 'white',

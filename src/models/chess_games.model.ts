@@ -37,6 +37,10 @@ const GameStateSchema = new Schema({
   current_card: {
     type: Object
   },
+  current_cards: {
+    type: Array,
+    default: []
+  },
   cards_deck: {
     type: Array
   }
@@ -65,6 +69,13 @@ const ChessGameSchema: Schema = new Schema({
     required: false,
     index: true,
     ref: 'user'
+  },
+  cards_to_draw: {
+    type: Number,
+    required: true,
+    default: 1,
+    min: 1,
+    max: 5
   },
   version: {
     type: Number,

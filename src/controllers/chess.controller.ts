@@ -47,8 +47,9 @@ export class ChessController {
         return res.status(400).json({ message: 'Valid color is required (white or black)' });
       }
       const isVsBot = req.body.is_vs_bot === true;
-      console.log(`isVsBot: ${isVsBot} typof isVsBot: ${typeof isVsBot}`);
-      const game = await this.chessService.createGame(user?._id ? user._id.toString() : guest._id.toString(), color, isVsBot);
+      const cardsToDraw = req.body.cards_to_draw || 1;
+      logger.info(`isVsBot: ${isVsBot} typof isVsBot: ${typeof isVsBot}`);
+      const game = await this.chessService.createGame(user?._id ? user._id.toString() : guest._id.toString(), color, isVsBot, cardsToDraw);
 
       return res.status(201).json({
         message: 'Chess game created successfully',
