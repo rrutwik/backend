@@ -9,6 +9,8 @@ import { ChatBotRoute } from './routes/chatbot.route';
 import { IFSCRoute } from './routes/ifsc.route';
 import { AdminRoute } from './routes/admin.route';
 import { ChessRoute } from './routes/chess.route';
+import { initSocket } from './socket';
+import { ChessService } from './services/chess.service';
 
 process.on('uncaughtException', (err) => {
   console.error('There was an uncaught error', err);
@@ -46,4 +48,13 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-app.listen();
+const chessService = new ChessService();
+
+initSocket(app.server, chessService).then((io) => {
+  app.server.setMaxListeners(0);
+  app.getApp().set("io", io);
+  app.listen();
+}).catch((error) => {
+  console.error('Error initializing Socket.IO:', error);
+  process.kill(process.pid, 'SIGINT')
+});

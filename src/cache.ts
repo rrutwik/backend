@@ -16,7 +16,7 @@ class HybridCache {
   private memoryCache: LRUCache<CacheKey, unknown>;
   private redis: Redis;
 
-  constructor(options?: CacheOptions, redisUrl = "redis://127.0.0.1:6379") {
+  constructor( redisUrl = "redis://127.0.0.1:6379", options?: CacheOptions) {
     this.memoryCache = new LRUCache<CacheKey, unknown>({
       ttl: options?.ttl ?? DEFAULT_TTL_MS,
       max: options?.max ?? DEFAULT_MAX_ITEMS,
@@ -97,5 +97,5 @@ class HybridCache {
 }
 
 // Default singleton
-export const cache = new HybridCache();
+export const cache = new HybridCache(process.env.REDIS_URL, {});
 export default HybridCache;

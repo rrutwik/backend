@@ -5,6 +5,7 @@ import { Container } from 'typedi';
 import { logger } from '@/utils/logger';
 import { GameState } from '@/interfaces/chessgame.interface';
 import { Guest } from '@/interfaces/guest.interface';
+import { Socket } from 'socket.io';
 
 export class ChessController {
   private chessService = Container.get(ChessService);
@@ -66,23 +67,21 @@ export class ChessController {
       const user: any = req.user;
       const guest: Guest = req.guest;
       const { gameId } = req.params;
-      console.log({
-        user,
-        guest
-      })
+
       if (!user && !guest) {
         return res.status(401).json({ message: 'User not authenticated' });
       }
-      console.log({
-        user,
-        guest
-      })
+
       if (!gameId) {
         return res.status(400).json({ message: 'Game ID is required' });
       }
 
       const game = await this.chessService.registerOpponent(gameId, user, guest);
-
+      const io = req.app.get("io") as Socket;
+      io.to(`game:${gameId}`).emit("game_updated", {
+        gameId,
+        data: game,
+      });
       return res.status(200).json({
         message: 'Successfully registered as opponent',
         data: game
@@ -169,6 +168,11 @@ export class ChessController {
       }
 
       const updatedGame = await this.chessService.updateGameState(gameId, version, gameState, user, guest);
+      const io = req.app.get("io") as Socket;
+      io.to(`game:${gameId}`).emit("game_updated", {
+        gameId,
+        data: updatedGame,
+      });
 
       return res.status(200).json({
         message: 'Game state updated successfully',

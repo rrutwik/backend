@@ -14,7 +14,7 @@ const getAuthorization = (req: RequestWithUser) => {
   const cookie = req.cookies['Authorization'];
   if (cookie) return cookie;
 
-  const header = req.header('Authorization');
+  const header = req.headers['Authorization'] as string || req.headers['authorization'] as string;
   if (header) return header.split('Bearer ')[1];
 
   return null;

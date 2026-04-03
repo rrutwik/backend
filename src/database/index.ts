@@ -25,7 +25,7 @@ export const dbConnection = async () => {
 
   // Enable debug mode for non-production environments
   if (NODE_ENV !== 'production') {
-    set('debug', true);
+    set('debug', false);
   }
 
   await connect(url, options);

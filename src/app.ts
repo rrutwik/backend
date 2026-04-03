@@ -14,14 +14,17 @@ import { ErrorMiddleware } from '@middlewares/error.middleware';
 import { logger, stream } from '@utils/logger';
 import cors from 'cors';
 import { cache } from './cache';
+import http from 'http';
 
 export class App {
   public app: express.Application;
   public env: string;
   public port: string | number;
+  public server: http.Server;
 
   constructor(routes: Routes[]) {
     this.app = express();
+    this.server = http.createServer(this.app);
     this.env = NODE_ENV || 'development';
     this.port = PORT || 3000;
     try {
@@ -36,7 +39,7 @@ export class App {
   }
 
   public listen() {
-    this.app.listen(this.port, () => {
+    this.server.listen(this.port, () => {
       logger.info(`=================================`);
       logger.info(`======= ENV: ${this.env} =======`);
       logger.info(`🚀 App listening on the port ${this.port}`);
@@ -44,7 +47,7 @@ export class App {
     });
   }
 
-  public getServer() {
+  public getApp() {
     return this.app;
   }
 

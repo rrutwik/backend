@@ -25,7 +25,7 @@ const languageMapping = {
   or: "Oriya",
   pa: "Punjabi"
 }
-const redisUrl = "redis://127.0.0.1:6379";
+const redisUrl = process.env.REDIS_URL || "redis://127.0.0.1:6379";
 
 const client = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
