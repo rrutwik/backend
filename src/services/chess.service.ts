@@ -97,17 +97,17 @@ export class ChessService {
       }
 
       // Check if opponent already has an active game with this player
-      const existingGame = await ChessGameModel.findOne({
-        $or: [
-          { player_white: creatorId, player_black: opponentId },
-          { player_white: opponentId, player_black: creatorId }
-        ],
-        'game_state.status': { $in: ['waiting_for_opponent', 'active'] }
-      });
+      // const existingGame = await ChessGameModel.findOne({
+      //   $or: [
+      //     { player_white: creatorId, player_black: opponentId },
+      //     { player_white: opponentId, player_black: creatorId }
+      //   ],
+      //   'game_state.status': { $in: ['waiting_for_opponent', 'active'] }
+      // });
 
-      if (existingGame) {
-        throw new HttpException(400, 'Active game already exists between these players');
-      }
+      // if (existingGame) {
+      //   throw new HttpException(400, 'Active game already exists between these players');
+      // }
 
       // Determine opponent color and update game
       const creatorColor = game.player_white ? 'white' : 'black';
