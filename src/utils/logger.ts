@@ -73,6 +73,11 @@ if (NODE_ENV === 'production') {
     level: "error",
     format: winston.format.combine(winston.format.splat(), winston.format.colorize())
   }));
+} else {
+  logger.add(new winston.transports.Console({
+    level: "debug",
+    format: winston.format.combine(winston.format.splat(), winston.format.colorize())
+  }));
 }
 
 // Create a custom logger that includes the caller info

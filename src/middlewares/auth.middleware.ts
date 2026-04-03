@@ -8,6 +8,7 @@ import { UserService } from '@/services/users.service';
 import { SessionDBService } from '@/dbservice/session';
 import { GuestModel } from '@/models/guest.model';
 import { cache } from '@/cache';
+import { HttpStatusCode } from 'axios';
 
 const getAuthorization = (req: RequestWithUser) => {
   const cookie = req.cookies['Authorization'];
@@ -67,22 +68,21 @@ export const AuthMiddleware = async (req: RequestWithUser, res: Response, next: 
 export const GuestMiddleware = async (req: RequestWithGuest, res: Response, next: NextFunction) => {
   try {
     const token = req.headers['x-guest-token'] as string;
-    if (token) {
+    if (token && token.trim() !== '') {
       const guest = await GuestModel.findOne({ session_uuid: token });
       if (guest) {
         req.guest = guest; // No user associated with guest session
         return next();
       } else {
         logger.error(`Guest session not found for token: ${token}`);
-        return next(new HttpException(401, 'Unexpected error occurred'));
+        return next(new HttpException(HttpStatusCode.BadRequest, 'Unexpected error occurred'));
       }
     }
-    logger.error('Guest token not found in headers');
-    return next(new HttpException(401, 'Unexpected error occurred'));
+    return next();
   } catch (error) {
     logger.info(`Error in guest middleware: ${error}`);
     logger.error(error);
-    return next(new HttpException(401, 'Unexpected error occurred'));
+    return next();
   }
 }
 
