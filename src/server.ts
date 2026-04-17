@@ -48,7 +48,7 @@ async function closeServer() {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
-  logger.debug('Shutdown signal received');
+  logger.info('Shutdown signal received');
 
   const forceExit = setTimeout(() => {
     logger.error('Force shutdown after 20s');
@@ -57,16 +57,16 @@ async function closeServer() {
 
   try {
     // 3. Close BullMQ (workers, queues, redis)
-    logger.debug('Closing BullMQ');
+    logger.info('Closing BullMQ');
     await closeBullMQ();
-    logger.debug('BullMQ closed');
+    logger.info('BullMQ closed');
 
     // 1. Close Socket.IO
     if (ioInstance) {
-      logger.debug('Closing Socket.IO');
+      logger.info('Closing Socket.IO');
       await ioInstance.close();
     }
-    logger.debug('Closing HTTP server');
+    logger.info('Closing HTTP server');
     await new Promise<void>((resolve) => {
       app.server.close((err) => {
         if (err) {
@@ -75,10 +75,10 @@ async function closeServer() {
         resolve();
       });
     });
-    logger.debug('HTTP server closed');
+    logger.info('HTTP server closed');
 
     clearTimeout(forceExit);
-    logger.debug('Shutdown complete');
+    logger.info('Shutdown complete');
     process.exit(0);
   } catch (error) {
     clearTimeout(forceExit);
