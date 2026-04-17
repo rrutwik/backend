@@ -11,16 +11,21 @@ import { ChessRoute } from './routes/chess.route';
 import { initSocket } from './socket';
 import { ChessService } from './services/chess.service';
 import { closeBullMQ, initBullMQ } from './jobs';
+import { logger } from './utils/logger';
+import { Server } from "socket.io";
 
+// --- GLOBAL ERROR HANDLERS ---
 process.on('uncaughtException', (err) => {
-  console.error('There was an uncaught error', err);
-  process.exit(1); //mandatory (as per the Node.js docs)
+  logger.error(`Uncaught Exception: ${err}`);
+  process.exit(1); // fatal, exit
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.log('Unhandled Rejection at:', promise, 'reason:', reason);
-  // Application specific logging, throwing an error, or other logic here
+  logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`);
+  // do NOT exit immediately, allow logging/cleanup
 });
+
+// --- APP INIT ---
 const app = new App([
   new IndexRoute(),
   new ChatBotRoute(),
@@ -33,51 +38,79 @@ const app = new App([
   new ChessRoute(),
 ]);
 
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM signal received.');
-  try {
-    await new Promise((resolve, reject) => {
-      app.server.close(() => {
-        resolve(null);
-      });
-    })
-    await closeBullMQ();
-    process.exit(0);
-  } catch (error) {
-    console.error('Error while shutting down server:', error);
-    process.exit(1);
-  }
-});
-
-process.on('SIGINT', async () => {
-  console.log('SIGINT signal received.');
-  try {
-    await new Promise((resolve, reject) => {
-      app.server.close(() => {
-        resolve(null);
-      });
-    })
-    await closeBullMQ();
-    process.exit(0);
-  } catch (error) {
-    console.error('Error while shutting down server:', error);
-    process.exit(1);
-  }
-});
-
 const chessService = new ChessService();
 
-initSocket(app.server, chessService).then(async (io) => {
-  app.server.setMaxListeners(0);
-  app.getApp().set("io", io);
-  app.listen();
-  // Restrict BullMQ cron/worker initialization to the primary PM2 instance (or local dev)
-  if (!process.env.INSTANCE_ID || process.env.INSTANCE_ID === '0') {
-    await initBullMQ(io, chessService);
-  }
+let ioInstance: Server;
+let isShuttingDown = false;
 
-  process.send?.('ready');
-}).catch((error) => {
-  console.error('Error initializing Socket.IO:', error);
-  process.kill(process.pid, 'SIGINT')
+// --- GRACEFUL SHUTDOWN ---
+async function closeServer() {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  logger.debug('Shutdown signal received');
+
+  const forceExit = setTimeout(() => {
+    logger.error('Force shutdown after 20s');
+    process.exit(1);
+  }, 20000);
+
+  try {
+    // 3. Close BullMQ (workers, queues, redis)
+    logger.debug('Closing BullMQ');
+    await closeBullMQ();
+    logger.debug('BullMQ closed');
+
+    // 1. Close Socket.IO
+    if (ioInstance) {
+      logger.debug('Closing Socket.IO');
+      await ioInstance.close();
+    }
+    logger.debug('Closing HTTP server');
+    await new Promise<void>((resolve) => {
+      app.server.close((err) => {
+        if (err) {
+          logger.error(`Error during HTTP server close: ${err}`);
+        }
+        resolve();
+      });
+    });
+    logger.debug('HTTP server closed');
+
+    clearTimeout(forceExit);
+    logger.debug('Shutdown complete');
+    process.exit(0);
+  } catch (error) {
+    clearTimeout(forceExit);
+    logger.error(`Error during shutdown: ${error}`);
+    process.exit(1);
+  }
+}
+
+// --- SIGNAL HANDLERS (PM2 + SYSTEM) ---
+['SIGINT', 'SIGTERM', 'SIGUSR1', 'SIGUSR2'].forEach((signal) => {
+  process.on(signal, closeServer);
 });
+
+// --- START SERVER + SOCKET ---
+initSocket(app.server, chessService)
+  .then(async (io) => {
+    ioInstance = io;
+
+    app.server.setMaxListeners(0);
+    app.getApp().set('io', io);
+
+    app.listen();
+
+    // Only run BullMQ in primary instance
+    if (!process.env.INSTANCE_ID || process.env.INSTANCE_ID === '0') {
+      await initBullMQ(io, chessService);
+    }
+
+    // Notify PM2 readiness (if using wait_ready)
+    process.send?.('ready');
+  })
+  .catch((error) => {
+    console.error('Error initializing Socket.IO:', error);
+    process.exit(1);
+  });
