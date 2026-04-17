@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { UserModel } from '@/models/user.model';
 import { User } from '@/interfaces/users.interface';
 import { generateGuestName } from '@/utils/guestNames';
+import { UserProfileModel } from '@/models/user_profile.model';
 
 type Suit = 'hearts' | 'diamonds' | 'clubs' | 'spades' | 'joker';
 type CardColor = 'red' | 'black';
@@ -55,7 +56,7 @@ export class ChessService {
 
   public async createGuestSession(metadata: Record<string, any>): Promise<Guest> {
     try {
-      const display_name = generateGuestName();
+      const display_name = await this.resolveDisplayName(null, true, generateGuestName());
       const guestSession = await GuestModel.create({
         session_uuid: uuidv4(),
         display_name,
@@ -81,27 +82,47 @@ export class ChessService {
     return hashHex.slice(0, 12).toUpperCase();
   }
 
+  private async resolveDisplayName(playerId: string, isGuest: boolean, fallbackName: string = generateGuestName()): Promise<string> {
+    try {
+      if (isGuest) {
+        const guest = await GuestModel.findById(playerId).select('display_name');
+        if (guest && guest.display_name) return guest.display_name;
+      } else {
+        const profile = await UserProfileModel.findOne({ user_id: playerId }).select('first_name last_name');
+        if (profile) {
+          const full = `${profile.first_name || ''} ${profile.last_name || ''}`.trim();
+          if (full) return full;
+        }
+      }
+    } catch (err) {
+      logger.error('Error resolving display name:', err);
+    }
+    return fallbackName;
+  }
+
   public async createGame(
     playerId: string,
     playerColor: 'white' | 'black',
     isVsBot: boolean = false,
     cardsToDraw: number = 1,
-    isGuest: boolean = false,
-    displayName: string = 'Unknown',
+    isGuest: boolean = false
   ): Promise<ChessGame> {
     try {
       if (!playerId) {
         throw new HttpException(400, 'Player ID is required to create a game');
       }
       const deck = createShuffledDeck();
+      const whiteName = playerColor === 'white' ? await this.resolveDisplayName(playerId, isGuest) : undefined;
+      const blackName = playerColor === 'black' ? await this.resolveDisplayName(playerId, isGuest) : undefined;
+
       const game = await ChessGameModel.create({
         game_id: await this.createUniqueGameId(playerId),
         player_white: playerColor === 'white' ? playerId : null,
         player_black: playerColor === 'black' ? playerId : null,
         player_white_is_guest: playerColor === 'white' ? isGuest : false,
         player_black_is_guest: playerColor === 'black' ? isGuest : false,
-        player_white_name: playerColor === 'white' ? displayName : undefined,
-        player_black_name: playerColor === 'black' ? displayName : undefined,
+        player_white_name: whiteName,
+        player_black_name: blackName,
         is_vs_bot: isVsBot,
         cards_to_draw: cardsToDraw,
         game_state: {
@@ -128,8 +149,8 @@ export class ChessService {
   public async createMatchmadeGame(
     player1Id: string,
     player2Id: string,
-    player1Meta: { isGuest: boolean; displayName: string },
-    player2Meta: { isGuest: boolean; displayName: string },
+    player1Meta: { isGuest: boolean },
+    player2Meta: { isGuest: boolean },
   ): Promise<ChessGame> {
     try {
       const deck = createShuffledDeck();
@@ -138,14 +159,17 @@ export class ChessService {
       const [whiteId, blackId] = isPlayer1White ? [player1Id, player2Id] : [player2Id, player1Id];
       const [whiteMeta, blackMeta] = isPlayer1White ? [player1Meta, player2Meta] : [player2Meta, player1Meta];
 
+      const whiteName = await this.resolveDisplayName(whiteId, whiteMeta.isGuest);
+      const blackName = await this.resolveDisplayName(blackId, blackMeta.isGuest);
+
       const game = await ChessGameModel.create({
         game_id: await this.createUniqueGameId(player1Id),
         player_white: whiteId,
         player_black: blackId,
         player_white_is_guest: whiteMeta.isGuest,
         player_black_is_guest: blackMeta.isGuest,
-        player_white_name: whiteMeta.displayName,
-        player_black_name: blackMeta.displayName,
+        player_white_name: whiteName,
+        player_black_name: blackName,
         is_vs_bot: false,
         cards_to_draw: 3,
         game_state: {
@@ -157,7 +181,7 @@ export class ChessService {
         }
       });
 
-      logger.info(`Matchmade game created: ${game.game_id} — white:${whiteId}(${whiteMeta.displayName}) black:${blackId}(${blackMeta.displayName})`);
+      logger.info(`Matchmade game created: ${game.game_id} — white:${whiteId}(${game.player_white_name}) black:${blackId}(${game.player_black_name})`);
       return game.toJSON();
     } catch (error) {
       logger.error('Error creating matchmade game:', error);
@@ -270,11 +294,17 @@ export class ChessService {
       // Determine opponent color and update game
       const creatorColor = game.player_white ? 'white' : 'black';
       const opponentColor = creatorColor === 'white' ? 'black' : 'white';
+      const isGuest = !user && !!guest;
+      const opponentName = await this.resolveDisplayName(opponentId, isGuest);
 
       if (opponentColor === 'white') {
         game.player_white = opponentId;
+        game.player_white_is_guest = isGuest;
+        game.player_white_name = opponentName;
       } else {
         game.player_black = opponentId;
+        game.player_black_is_guest = isGuest;
+        game.player_black_name = opponentName;
       }
 
       // Update game state to active
@@ -447,8 +477,8 @@ export class ChessService {
         ],
         'game_state.status': { $in: ['completed', 'abandoned'] }
       })
-      .sort({ completed_at: -1 })
-      .limit(limit);
+        .sort({ completed_at: -1 })
+        .limit(limit);
 
       return games.map(game => game.toJSON());
     } catch (error) {
