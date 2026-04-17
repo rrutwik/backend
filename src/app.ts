@@ -59,12 +59,10 @@ export class App {
       const redisConnected = await cache.testConnection();
       if (!redisConnected) {
         logger.error('Redis connection failed');
-        // send SIGINT
         process.kill(process.pid, 'SIGINT');
       }
     } catch (error) {
       logger.error(`Error connecting to the database: ${error}`);
-      // send SIGINT
       process.kill(process.pid, 'SIGINT');
     }
   }

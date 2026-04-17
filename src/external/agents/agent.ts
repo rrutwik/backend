@@ -11,6 +11,7 @@ import { sha256 } from "@langchain/core/utils/hash";
 import { ChatBot } from "@/interfaces/chatbot.interface";
 import { throttle } from 'lodash';
 import { concat } from "@langchain/core/utils/stream";
+import { env } from "@/env";
 
 
 const modelName = OPENAI_MODEL_NAME ?? "gpt-3.5-turbo-1106";
@@ -25,7 +26,7 @@ const languageMapping = {
   or: "Oriya",
   pa: "Punjabi"
 }
-const redisUrl = process.env.REDIS_URL || "redis://127.0.0.1:6379";
+const redisUrl = env.REDIS_URL;
 
 const client = new Redis(redisUrl, {
   maxRetriesPerRequest: null,

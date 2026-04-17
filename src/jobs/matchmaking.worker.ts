@@ -54,7 +54,7 @@ export const initMatchmakingWorker = (io: Server, chessService: ChessService) =>
     }
   }, {
     connection: bullmqRedisConnection,
-    prefix: 'backend_bullmq'
+    prefix: 'backend_bullmq:'
   });
 
   worker.on('failed', (job, err) => {

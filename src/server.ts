@@ -11,8 +11,6 @@ import { ChessRoute } from './routes/chess.route';
 import { initSocket } from './socket';
 import { ChessService } from './services/chess.service';
 import { closeBullMQ, initBullMQ } from './jobs';
-import { resolve } from 'path';
-import { reject } from 'lodash';
 
 process.on('uncaughtException', (err) => {
   console.error('There was an uncaught error', err);
@@ -69,16 +67,16 @@ process.on('SIGINT', async () => {
 
 const chessService = new ChessService();
 
-initSocket(app.server, chessService).then((io) => {
+initSocket(app.server, chessService).then(async (io) => {
   app.server.setMaxListeners(0);
   app.getApp().set("io", io);
-
+  app.listen();
   // Restrict BullMQ cron/worker initialization to the primary PM2 instance (or local dev)
   if (!process.env.INSTANCE_ID || process.env.INSTANCE_ID === '0') {
-    initBullMQ(io, chessService);
+    await initBullMQ(io, chessService);
   }
 
-  app.listen();
+  process.send?.('ready');
 }).catch((error) => {
   console.error('Error initializing Socket.IO:', error);
   process.kill(process.pid, 'SIGINT')

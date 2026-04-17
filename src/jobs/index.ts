@@ -13,7 +13,7 @@ export const initBullMQ = async (io: Server, chessService: ChessService) => {
   // Setup Matchmaking Queue
   const matchmakingQueue = new Queue(MATCHMAKING_QUEUE_NAME, {
     connection: bullmqRedisConnection,
-    prefix: 'backend_bullmq'
+    prefix: 'backend_bullmq:'
   });
   await matchmakingQueue.add('processMatchmaking', {}, {
     repeat: { every: 5000 },
@@ -25,7 +25,7 @@ export const initBullMQ = async (io: Server, chessService: ChessService) => {
   // Setup Auto Abandon Queue
   const autoAbandonQueue = new Queue(AUTO_ABANDON_QUEUE_NAME, {
     connection: bullmqRedisConnection,
-    prefix: 'backend_bullmq'
+    prefix: 'backend_bullmq:'
   });
   await autoAbandonQueue.add('processAutoAbandon', {}, {
     repeat: { every: 10000 }, // checks every 10s

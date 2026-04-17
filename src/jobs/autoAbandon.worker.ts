@@ -42,7 +42,7 @@ export const initAutoAbandonWorker = (io: Server) => {
     }
   }, {
     connection: bullmqRedisConnection,
-    prefix: 'backend_bullmq'
+    prefix: 'backend_bullmq:'
   });
 
   worker.on('failed', (job, err) => {

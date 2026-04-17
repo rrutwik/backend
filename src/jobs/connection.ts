@@ -1,13 +1,13 @@
 import { Queue, Worker, QueueEvents, Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { logger } from '@/utils/logger';
+import { env } from '@/env';
 
-const redisUrl = process.env.REDIS_URL || `redis://${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`;
+const redisUrl = env.REDIS_URL;
 
 export const bullmqRedisConnection = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
   enableReadyCheck: true,
-  keyPrefix: 'backend_bullmq:',
   db: 0,
 });
 

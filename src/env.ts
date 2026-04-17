@@ -11,7 +11,7 @@ export const env = cleanEnv(process.env, {
   LOG_FORMAT: str({ default: 'dev' }),
   LOG_DIR: str({ default: '../logs' }),
   ORIGINS: str({ default: '*' }),
-  
+
   DB_HOST: str({ default: 'localhost' }),
   DB_URL: str({ default: 'mongodb://localhost:27017' }),
   DB_PORT: port({ default: 27017 }),

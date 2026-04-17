@@ -1,6 +1,7 @@
 import Redis from "ioredis";
 import { LRUCache } from "lru-cache";
 import { logger } from "./utils/logger";
+import { env } from "./env";
 
 export type CacheKey = string;
 
@@ -98,5 +99,5 @@ class HybridCache {
 }
 
 // Default singleton
-export const cache = new HybridCache(process.env.REDIS_URL, {});
+export const cache = new HybridCache(env.REDIS_URL, {});
 export default HybridCache;
