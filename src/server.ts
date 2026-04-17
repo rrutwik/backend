@@ -10,7 +10,9 @@ import { AdminRoute } from './routes/admin.route';
 import { ChessRoute } from './routes/chess.route';
 import { initSocket } from './socket';
 import { ChessService } from './services/chess.service';
-import { initBullMQ } from './jobs';
+import { closeBullMQ, initBullMQ } from './jobs';
+import { resolve } from 'path';
+import { reject } from 'lodash';
 
 process.on('uncaughtException', (err) => {
   console.error('There was an uncaught error', err);
@@ -33,16 +35,36 @@ const app = new App([
   new ChessRoute(),
 ]);
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('SIGTERM signal received.');
-  // Perform cleanup tasks here
-  process.exit(0);
+  try {
+    await new Promise((resolve, reject) => {
+      app.server.close(() => {
+        resolve(null);
+      });
+    })
+    await closeBullMQ();
+    process.exit(0);
+  } catch (error) {
+    console.error('Error while shutting down server:', error);
+    process.exit(1);
+  }
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('SIGINT signal received.');
-  // Perform cleanup tasks here
-  process.exit(0);
+  try {
+    await new Promise((resolve, reject) => {
+      app.server.close(() => {
+        resolve(null);
+      });
+    })
+    await closeBullMQ();
+    process.exit(0);
+  } catch (error) {
+    console.error('Error while shutting down server:', error);
+    process.exit(1);
+  }
 });
 
 const chessService = new ChessService();
