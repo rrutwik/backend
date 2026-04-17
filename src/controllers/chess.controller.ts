@@ -26,7 +26,8 @@ export class ChessController {
       return res.status(200).json({
         message: 'Guest session created successfully',
         _id: guestSession._id,
-        token: guestSession.session_uuid
+        token: guestSession.session_uuid,
+        display_name: guestSession.display_name,
       });
     } catch (error) {
       logger.error('Error creating guest session:', error);
@@ -49,8 +50,17 @@ export class ChessController {
       }
       const isVsBot = req.body.is_vs_bot === true;
       const cardsToDraw = req.body.cards_to_draw || 1;
+      const isGuest = !user && !!guest;
+      const displayName = user?.username || user?.email || guest?.display_name || 'Unknown';
       logger.info(`isVsBot: ${isVsBot} typof isVsBot: ${typeof isVsBot}`);
-      const game = await this.chessService.createGame(user?._id ? user._id.toString() : guest._id.toString(), color, isVsBot, cardsToDraw);
+      const game = await this.chessService.createGame(
+        user?._id ? user._id.toString() : guest._id.toString(),
+        color,
+        isVsBot,
+        cardsToDraw,
+        isGuest,
+        displayName,
+      );
 
       return res.status(201).json({
         message: 'Chess game created successfully',

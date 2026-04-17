@@ -24,6 +24,14 @@ export interface ChessGame {
   cards_to_draw: number;
   player_white: string | ObjectId;
   player_black: string | ObjectId;
+  /** Whether player_white is a guest (helps distinguish guest vs user IDs) */
+  player_white_is_guest?: boolean;
+  /** Whether player_black is a guest */
+  player_black_is_guest?: boolean;
+  /** Display name for white player (username or guest name) */
+  player_white_name?: string;
+  /** Display name for black player */
+  player_black_name?: string;
   game_state: GameState;
   created_at?: Date;
   updated_at?: Date;

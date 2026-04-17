@@ -1,5 +1,5 @@
 import Container, { Service } from 'typedi';
-import { ChessGame, GameState } from '@/interfaces/chessgame.interface';
+import { ChessGame, GameState, PlayingCard } from '@/interfaces/chessgame.interface';
 import { ChessGameModel } from '@/models/chess_games.model';
 import { HttpException } from '@/exceptions/HttpException';
 import { logger } from '@/utils/logger';
@@ -10,17 +10,58 @@ import { GuestModel } from '@/models/guest.model';
 import { v4 as uuidv4 } from 'uuid';
 import { UserModel } from '@/models/user.model';
 import { User } from '@/interfaces/users.interface';
+import { generateGuestName } from '@/utils/guestNames';
+
+type Suit = 'hearts' | 'diamonds' | 'clubs' | 'spades' | 'joker';
+type CardColor = 'red' | 'black';
+
+interface DeckCard {
+  suit: Suit;
+  value: string;
+  color: CardColor;
+}
+
+const SUITS: Suit[] = ['hearts', 'diamonds', 'clubs', 'spades'];
+const VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+function createShuffledDeck(): DeckCard[] {
+  const cards: DeckCard[] = [];
+
+  for (const suit of SUITS) {
+    for (const value of VALUES) {
+      cards.push({
+        suit,
+        value,
+        color: (suit === 'hearts' || suit === 'diamonds') ? 'red' : 'black',
+      });
+    }
+  }
+
+  // Add 2 jokers (matches frontend deckUtils.ts)
+  cards.push({ suit: 'joker', value: 'Joker', color: 'red' });
+  cards.push({ suit: 'joker', value: 'Joker', color: 'black' });
+
+  // Fisher-Yates shuffle
+  for (let i = cards.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [cards[i], cards[j]] = [cards[j], cards[i]];
+  }
+
+  return cards;
+}
 
 @Service()
 export class ChessService {
 
   public async createGuestSession(metadata: Record<string, any>): Promise<Guest> {
     try {
+      const display_name = generateGuestName();
       const guestSession = await GuestModel.create({
         session_uuid: uuidv4(),
+        display_name,
         metadata,
       });
-      logger.info(`Guest session created: ${guestSession.session_uuid}`);
+      logger.info(`Guest session created: ${guestSession.session_uuid} (${display_name})`);
       return guestSession.toJSON();
     } catch (error) {
       logger.error('Error creating guest session:', error);
@@ -40,29 +81,159 @@ export class ChessService {
     return hashHex.slice(0, 12).toUpperCase();
   }
 
-  public async createGame(playerId: string, playerColor: 'white' | 'black', isVsBot: boolean = false, cardsToDraw: number = 1): Promise<ChessGame> {
+  public async createGame(
+    playerId: string,
+    playerColor: 'white' | 'black',
+    isVsBot: boolean = false,
+    cardsToDraw: number = 1,
+    isGuest: boolean = false,
+    displayName: string = 'Unknown',
+  ): Promise<ChessGame> {
     try {
       if (!playerId) {
         throw new HttpException(400, 'Player ID is required to create a game');
       }
+      const deck = createShuffledDeck();
       const game = await ChessGameModel.create({
         game_id: await this.createUniqueGameId(playerId),
         player_white: playerColor === 'white' ? playerId : null,
         player_black: playerColor === 'black' ? playerId : null,
+        player_white_is_guest: playerColor === 'white' ? isGuest : false,
+        player_black_is_guest: playerColor === 'black' ? isGuest : false,
+        player_white_name: playerColor === 'white' ? displayName : undefined,
+        player_black_name: playerColor === 'black' ? displayName : undefined,
         is_vs_bot: isVsBot,
         cards_to_draw: cardsToDraw,
         game_state: {
           fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
           turn: 'white',
           status: isVsBot ? 'active' : 'waiting_for_opponent',
-          moves: []
+          moves: [],
+          cards_deck: deck,
         }
       });
 
-      logger.info(`Chess game created: ${game.game_id} by ${playerId} as ${playerColor}`);
+      logger.info(`Chess game created: ${game.game_id} by ${playerId} (${isGuest ? 'guest' : 'user'}) as ${playerColor}`);
       return game.toJSON();
     } catch (error) {
       logger.error('Error creating chess game:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Creates a matchmade game between two players with random color assignment.
+   * Cards to draw is fixed at 3, and the deck is pre-initialized.
+   */
+  public async createMatchmadeGame(
+    player1Id: string,
+    player2Id: string,
+    player1Meta: { isGuest: boolean; displayName: string },
+    player2Meta: { isGuest: boolean; displayName: string },
+  ): Promise<ChessGame> {
+    try {
+      const deck = createShuffledDeck();
+      // Randomly assign colors
+      const isPlayer1White = Math.random() < 0.5;
+      const [whiteId, blackId] = isPlayer1White ? [player1Id, player2Id] : [player2Id, player1Id];
+      const [whiteMeta, blackMeta] = isPlayer1White ? [player1Meta, player2Meta] : [player2Meta, player1Meta];
+
+      const game = await ChessGameModel.create({
+        game_id: await this.createUniqueGameId(player1Id),
+        player_white: whiteId,
+        player_black: blackId,
+        player_white_is_guest: whiteMeta.isGuest,
+        player_black_is_guest: blackMeta.isGuest,
+        player_white_name: whiteMeta.displayName,
+        player_black_name: blackMeta.displayName,
+        is_vs_bot: false,
+        cards_to_draw: 3,
+        game_state: {
+          fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+          turn: 'white',
+          status: 'active',
+          moves: [],
+          cards_deck: deck,
+        }
+      });
+
+      logger.info(`Matchmade game created: ${game.game_id} — white:${whiteId}(${whiteMeta.displayName}) black:${blackId}(${blackMeta.displayName})`);
+      return game.toJSON();
+    } catch (error) {
+      logger.error('Error creating matchmade game:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Draws N cards from the deck for the current player.
+   * The deck and current_cards are updated atomically in the DB.
+   */
+  public async drawCards(gameId: string, count?: number, user?: User, guest?: Guest): Promise<ChessGame> {
+    try {
+      const gameModel = await ChessGameModel.findOne({ game_id: gameId });
+      if (!gameModel) {
+        throw new HttpException(404, 'Chess game not found');
+      }
+
+      const game = gameModel.toJSON();
+
+      if (game.game_state.status !== 'active') {
+        throw new HttpException(400, 'Game is not active');
+      }
+
+      // Verify the requester is a player
+      const playerId = user?._id?.toString() || guest?._id?.toString();
+      const isPlayerWhite = game.player_white?.toString() === playerId;
+      const isPlayerBlack = game.player_black?.toString() === playerId;
+      if (!game.is_vs_bot && !isPlayerWhite && !isPlayerBlack) {
+        throw new HttpException(403, 'You are not a player in this game');
+      }
+
+      // Verify it's this player's turn
+      const playerColor = isPlayerWhite ? 'white' : 'black';
+      if (!game.is_vs_bot && game.game_state.turn !== playerColor) {
+        throw new HttpException(400, `It's not your turn. Current turn: ${game.game_state.turn}`);
+      }
+
+      const deck: DeckCard[] = [...(game.game_state.cards_deck as DeckCard[] || [])];
+      // Use explicit count or fall back to the game's configured cards_to_draw
+      const drawCount = count ?? game.cards_to_draw;
+
+      // If deck is running low, append a new shuffled deck
+      if (deck.length < drawCount + 5) {
+        const refill = createShuffledDeck();
+        deck.push(...refill);
+        logger.info(`Deck refilled for game ${gameId}`);
+      }
+
+      if (deck.length < drawCount) {
+        throw new HttpException(400, 'Not enough cards in deck');
+      }
+
+      // Pop drawCount cards from the end of the deck
+      const drawnCards = deck.splice(deck.length - drawCount, drawCount);
+
+      const updatedGame = await ChessGameModel.findOneAndUpdate(
+        { game_id: gameId },
+        {
+          $set: {
+            'game_state.current_cards': drawnCards,
+            'game_state.cards_deck': deck,
+          },
+          $inc: { version: 1 },
+        },
+        { new: true }
+      );
+
+      if (!updatedGame) {
+        throw new HttpException(409, 'Failed to draw cards — please try again');
+      }
+
+      logger.info(`Drew ${count} cards for game ${gameId} by player ${playerId}`);
+      return updatedGame.toJSON();
+    } catch (error) {
+      logger.error('Error drawing cards:', error);
       throw error;
     }
   }
@@ -95,19 +266,6 @@ export class ChessService {
       if (creatorId?.toString() === opponentId) {
         throw new HttpException(400, 'Cannot join your own game as opponent');
       }
-
-      // Check if opponent already has an active game with this player
-      // const existingGame = await ChessGameModel.findOne({
-      //   $or: [
-      //     { player_white: creatorId, player_black: opponentId },
-      //     { player_white: opponentId, player_black: creatorId }
-      //   ],
-      //   'game_state.status': { $in: ['waiting_for_opponent', 'active'] }
-      // });
-
-      // if (existingGame) {
-      //   throw new HttpException(400, 'Active game already exists between these players');
-      // }
 
       // Determine opponent color and update game
       const creatorColor = game.player_white ? 'white' : 'black';
@@ -192,11 +350,15 @@ export class ChessService {
       if (expectedTurn !== playerColor && !game.is_vs_bot) {
         throw new HttpException(400, `It's not your turn. Current turn: ${expectedTurn}`);
       }
+
+      // Strip cards_deck from incoming state — deck is managed solely by draw_card events
+      const { cards_deck: _ignored, ...sanitizedState } = gameState as GameState & { cards_deck?: unknown };
+
       // Perform atomic update with version increment
       const updatedGame = await ChessGameModel.findOneAndUpdate(
         { game_id: gameId, version }, // must match old version
         {
-          $set: { game_state: { ...game.game_state, ...gameState } },
+          $set: { game_state: { ...game.game_state, ...sanitizedState } },
           $inc: { version: 1 }, // increment version
         },
         { new: true }

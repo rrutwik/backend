@@ -62,13 +62,25 @@ const ChessGameSchema: Schema = new Schema({
     type: Schema.Types.ObjectId,
     required: false,
     index: true,
-    ref: 'user'
   },
   player_black: {
     type: Schema.Types.ObjectId,
     required: false,
     index: true,
-    ref: 'user'
+  },
+  player_white_is_guest: {
+    type: Boolean,
+    default: false,
+  },
+  player_black_is_guest: {
+    type: Boolean,
+    default: false,
+  },
+  player_white_name: {
+    type: String,
+  },
+  player_black_name: {
+    type: String,
   },
   cards_to_draw: {
     type: Number,

@@ -7,6 +7,10 @@ const GuestSchema: Schema = new Schema({
         required: true,
         unique: true,
     },
+    display_name: {
+        type: String,
+        required: true,
+    },
     metadata: {
         type: Object,
         default: {},
