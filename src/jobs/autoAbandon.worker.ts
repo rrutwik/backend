@@ -40,7 +40,10 @@ export const initAutoAbandonWorker = (io: Server) => {
     } catch (err) {
       logger.error("Auto-abandon worker error:", err);
     }
-  }, { connection: bullmqRedisConnection });
+  }, {
+    connection: bullmqRedisConnection,
+    prefix: 'backend_bullmq'
+  });
 
   worker.on('failed', (job, err) => {
     logger.error(`AutoAbandon job failed:`, err);

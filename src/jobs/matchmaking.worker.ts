@@ -52,7 +52,10 @@ export const initMatchmakingWorker = (io: Server, chessService: ChessService) =>
     } catch (err) {
       logger.error("Matchmaking worker error:", err);
     }
-  }, { connection: bullmqRedisConnection });
+  }, {
+    connection: bullmqRedisConnection,
+    prefix: 'backend_bullmq'
+  });
 
   worker.on('failed', (job, err) => {
     logger.error(`Matchmaking job failed:`, err);
