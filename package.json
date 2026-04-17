@@ -25,6 +25,7 @@
     "axios": "1.13.5",
     "bcrypt": "6.0.0",
     "chatgpt": "5.2.5",
+    "chess.js": "^1.4.0",
     "class-transformer": "0.5.1",
     "class-validator": "0.14.0",
     "compression": "1.8.1",

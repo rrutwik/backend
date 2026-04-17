@@ -12,6 +12,7 @@ import { UserModel } from '@/models/user.model';
 import { User } from '@/interfaces/users.interface';
 import { generateGuestName } from '@/utils/guestNames';
 import { UserProfileModel } from '@/models/user_profile.model';
+import { Chess } from 'chess.js';
 
 type Suit = 'hearts' | 'diamonds' | 'clubs' | 'spades' | 'joker';
 type CardColor = 'red' | 'black';
@@ -235,6 +236,37 @@ export class ChessService {
         throw new HttpException(400, 'Not enough cards in deck');
       }
 
+      // Backend native Check evaluation tracking
+      const chess = new Chess(game.game_state.fen);
+      let isCheckmateLoss = false;
+      let newCheckAttempts = game.game_state.check_attempts || 0;
+
+      if (chess.inCheck()) {
+        newCheckAttempts += 1;
+        if (newCheckAttempts > 5) {
+          isCheckmateLoss = true;
+        }
+      }
+
+      // Automatically terminate game if they've exceeded their check attempts
+      if (isCheckmateLoss) {
+        const winnerColor = game.game_state.turn === 'white' ? 'black' : 'white';
+        const checkmatedGame = await ChessGameModel.findOneAndUpdate(
+          { game_id: gameId },
+          {
+            $set: {
+              'game_state.status': 'completed',
+              'game_state.winner': winnerColor,
+              'game_state.check_attempts': newCheckAttempts
+            },
+            $inc: { version: 1 }
+          },
+          { new: true }
+        );
+        logger.info(`Game over by check attempt limit for game ${gameId}`);
+        return checkmatedGame!.toJSON();
+      }
+
       // Pop drawCount cards from the end of the deck
       const drawnCards = deck.splice(deck.length - drawCount, drawCount);
 
@@ -244,6 +276,7 @@ export class ChessService {
           $set: {
             'game_state.current_cards': drawnCards,
             'game_state.cards_deck': deck,
+            'game_state.check_attempts': newCheckAttempts,
           },
           $inc: { version: 1 },
         },
@@ -385,10 +418,12 @@ export class ChessService {
       const { cards_deck: _ignored, ...sanitizedState } = gameState as GameState & { cards_deck?: unknown };
 
       // Perform atomic update with version increment
+      const finalGameState = { ...game.game_state, ...sanitizedState, check_attempts: 0 };
+      
       const updatedGame = await ChessGameModel.findOneAndUpdate(
         { game_id: gameId, version }, // must match old version
         {
-          $set: { game_state: { ...game.game_state, ...sanitizedState } },
+          $set: { game_state: finalGameState },
           $inc: { version: 1 }, // increment version
         },
         { new: true }
