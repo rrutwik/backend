@@ -193,7 +193,7 @@ export class ChessService {
    * Draws N cards from the deck for the current player.
    * The deck and current_cards are updated atomically in the DB.
    */
-  public async drawCards(gameId: string, count?: number, user?: User, guest?: Guest): Promise<ChessGame> {
+  public async drawCards(gameId: string, user?: User, guest?: Guest): Promise<ChessGame> {
     try {
       const gameModel = await ChessGameModel.findOne({ game_id: gameId });
       if (!gameModel) {
@@ -222,7 +222,7 @@ export class ChessService {
 
       const deck: DeckCard[] = [...(game.game_state.cards_deck as DeckCard[] || [])];
       // Use explicit count or fall back to the game's configured cards_to_draw
-      const drawCount = count ?? game.cards_to_draw;
+      const drawCount = game.cards_to_draw;
 
       // If deck is running low, append a new shuffled deck
       if (deck.length < drawCount + 5) {
@@ -254,7 +254,7 @@ export class ChessService {
         throw new HttpException(409, 'Failed to draw cards — please try again');
       }
 
-      logger.info(`Drew ${count} cards for game ${gameId} by player ${playerId}`);
+      logger.info(`Drew ${drawCount} cards for game ${gameId} by player ${playerId}`);
       return updatedGame.toJSON();
     } catch (error) {
       logger.error('Error drawing cards:', error);

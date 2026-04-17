@@ -283,7 +283,7 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
     socket.on("draw_card", async (payload: { gameId: string }) => {
       try {
         const { gameId } = payload;
-        const updatedGame = await chessService.drawCards(gameId, undefined, user, guest);
+        const updatedGame = await chessService.drawCards(gameId, user, guest);
         io.to(`game:${gameId}`).emit("game_updated", {
           gameId,
           data: updatedGame,
