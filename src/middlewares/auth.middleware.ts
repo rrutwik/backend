@@ -11,10 +11,10 @@ import { cache } from '@/cache';
 import { HttpStatusCode } from 'axios';
 
 const getAuthorization = (req: RequestWithUser) => {
-  const cookie = req.cookies['Authorization'];
+  const cookie = req.cookies?.['Authorization'];
   if (cookie) return cookie;
 
-  const header = req.headers['Authorization'] as string || req.headers['authorization'] as string;
+  const header = req.headers?.['Authorization'] as string || req.headers?.['authorization'] as string;
   if (header) return header.split('Bearer ')[1];
 
   return null;
