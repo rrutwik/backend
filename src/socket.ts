@@ -11,6 +11,8 @@ import { Guest } from "./interfaces/guest.interface";
 import { GameState } from "./interfaces/chessgame.interface";
 import { logger } from "./utils/logger";
 import { UserProfileModel } from "./models/user_profile.model";
+import { enqueuePlayer, dequeueByPlayerId, getQueueCount } from "./utils/matchmaking";
+import { queueClient } from "./jobs/connection";
 
 declare module "socket.io" {
   interface SocketData {
@@ -58,86 +60,10 @@ export const socketAuthAdapter = async (socket: Socket, next: (err?: Error) => v
   }
 };
 
-const QUEUE_KEY = "matchmaking:queue";
-const MATCHMAKING_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-
-interface QueueEntry {
-  playerId: string;
-  socketId: string;
-  joinedAt: number;
-  isGuest: boolean;
-}
-
-async function enqueuePlayer(redis: Redis, entry: QueueEntry): Promise<void> {
-  // Remove existing entry for this player (de-dupe)
-  const raw = await redis.lrange(QUEUE_KEY, 0, -1);
-  for (const item of raw) {
-    const parsed = JSON.parse(item) as QueueEntry;
-    if (parsed.playerId === entry.playerId) {
-      await redis.lrem(QUEUE_KEY, 0, item);
-    }
-  }
-  await redis.rpush(QUEUE_KEY, JSON.stringify(entry));
-  await redis.expire(QUEUE_KEY, 600);
-}
-
-async function dequeueByPlayerId(redis: Redis, playerId: string): Promise<void> {
-  const raw = await redis.lrange(QUEUE_KEY, 0, -1);
-  for (const item of raw) {
-    const parsed = JSON.parse(item) as QueueEntry;
-    if (parsed.playerId === playerId) {
-      await redis.lrem(QUEUE_KEY, 0, item);
-    }
-  }
-}
-
-const LUA_POP_TWO = `
-  local len = redis.call('LLEN', KEYS[1])
-  if len >= 2 then
-    local p1 = redis.call('LPOP', KEYS[1])
-    local p2 = redis.call('LPOP', KEYS[1])
-    return {p1, p2}
-  end
-  return nil
-`;
-
-async function popTwoPlayers(redis: Redis): Promise<[QueueEntry, QueueEntry] | null> {
-  const result = await redis.eval(LUA_POP_TWO, 1, QUEUE_KEY) as string[] | null;
-  if (!result || result.length !== 2) return null;
-  return [JSON.parse(result[0]) as QueueEntry, JSON.parse(result[1]) as QueueEntry];
-}
-
-const LUA_GET_EXPIRED = `
-  local len = redis.call('LLEN', KEYS[1])
-  local expired = {}
-  local now = tonumber(ARGV[1])
-  local timeout = tonumber(ARGV[2])
-
-  for i=1, len do
-    local itemStr = redis.call('LINDEX', KEYS[1], 0)
-    if not itemStr then break end
-    
-    local decoded = cjson.decode(itemStr)
-    if now - tonumber(decoded.joinedAt) > timeout then
-      local popped = redis.call('LPOP', KEYS[1])
-      table.insert(expired, popped)
-    else
-      -- Since it's a FIFO queue, if the oldest isn't expired, the rest aren't either
-      break
-    end
-  end
-  return expired
-`;
-
-async function popExpiredPlayers(redis: Redis, nowMs: number, timeoutMs: number): Promise<QueueEntry[]> {
-  const result = await redis.eval(LUA_GET_EXPIRED, 1, QUEUE_KEY, nowMs, timeoutMs) as string[] | null;
-  if (!result) return [];
-  return result.map(str => JSON.parse(str) as QueueEntry);
-}
-
-async function getQueueCount(redis: Redis): Promise<number> {
-  return redis.llen(QUEUE_KEY);
-}
+const broadcastMatchmakingCount = async (io: Server) => {
+  const count = await getQueueCount(queueClient);
+  io.emit("matchmaking_count", { count });
+};
 
 // ─── Socket Server ────────────────────────────────────────────────────────────
 
@@ -161,72 +87,11 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
   });
   const subClient = pubClient.duplicate();
 
-  // Dedicated Redis db for matchmaking queue (db 13 to avoid collision)
-  const queueClient = new createClient({
-    host: process.env.REDIS_HOST,
-    port: Number(process.env.REDIS_PORT || 6379),
-    db: 13,
-    lazyConnect: true,
-    maxRetriesPerRequest: null,
-    enableReadyCheck: true,
-  });
-
   await pubClient.connect();
   await subClient.connect();
-  await queueClient.connect();
 
   io.adapter(createAdapter(pubClient, subClient));
   logger.info("Redis adapter initialized for Socket.IO");
-
-  const broadcastMatchmakingCount = async () => {
-    const count = await getQueueCount(queueClient);
-    io.emit("matchmaking_count", { count });
-  };
-
-  // ── Matchmaking Cron Job (runs every 5 seconds) ────────────────────────
-  setInterval(async () => {
-    try {
-      // 1. Acquire distributed lock (expires in 4 seconds) so only ONE production node does this at a time
-      const lock = await queueClient.set("matchmaking:lock", "1", "PX", 4000, "NX");
-      if (!lock) return; // Another node is currently running the matchmaking cron
-
-      // 2. Process Timeouts (FIFO queue left side is oldest)
-      const expiredPlayers = await popExpiredPlayers(queueClient, Date.now(), MATCHMAKING_TIMEOUT_MS);
-      if (expiredPlayers.length > 0) {
-        for (const player of expiredPlayers) {
-          io.to(player.socketId).emit("matchmaking_timeout", { message: "No opponent found. Please try again." });
-          logger.info(`Matchmaking timeout for player ${player.playerId}`);
-        }
-        await broadcastMatchmakingCount();
-      }
-
-      // 3. Process matches
-      while (true) {
-        const pair = await popTwoPlayers(queueClient);
-        if (!pair) break; // No more pairs available
-
-        const [entry1, entry2] = pair;
-
-        const game = await chessService.createMatchmadeGame(
-          entry1.playerId,
-          entry2.playerId,
-          { isGuest: entry1.isGuest },
-          { isGuest: entry2.isGuest },
-        );
-
-        const player1Color = game.player_white?.toString() === entry1.playerId ? "white" : "black";
-        const player2Color = player1Color === "white" ? "black" : "white";
-
-        io.to(entry1.socketId).emit("matchmaking_found", { gameId: game.game_id, color: player1Color });
-        io.to(entry2.socketId).emit("matchmaking_found", { gameId: game.game_id, color: player2Color });
-
-        await broadcastMatchmakingCount();
-        logger.info(`Match! Game ${game.game_id}: ${entry1.playerId}(${player1Color}) vs ${entry2.playerId}(${player2Color})`);
-      }
-    } catch (err) {
-      logger.error("Matchmaking cron error:", err);
-    }
-  }, 5000);
 
   io.on("connection", (socket: Socket) => {
     const user: User = socket.data.user;
@@ -325,7 +190,7 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
         });
 
         logger.info(`Player ${playerId} joined matchmaking queue`);
-        await broadcastMatchmakingCount();
+        await broadcastMatchmakingCount(io);
 
 
         // Notify the user they are in the queue.
@@ -343,7 +208,7 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
         if (!playerId) return;
         await dequeueByPlayerId(queueClient, playerId);
         socket.emit("matchmaking_cancelled", {});
-        await broadcastMatchmakingCount();
+        await broadcastMatchmakingCount(io);
         logger.info(`Player ${playerId} left matchmaking queue`);
       } catch (err) {
         logger.error("leave_matchmaking error:", err);
@@ -365,7 +230,7 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
       logger.info(`Socket ${socket.id} disconnected:`, reason);
       if (playerId) {
         await dequeueByPlayerId(queueClient, playerId);
-        await broadcastMatchmakingCount();
+        await broadcastMatchmakingCount(io);
       }
     });
   });
