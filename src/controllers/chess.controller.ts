@@ -111,11 +111,11 @@ export class ChessController {
       // Verify the user is part of this game
       const isPlayer = game.player_white?.toString() === user?._id.toString() || game.player_black?.toString() === user?._id.toString() || (guest && (game.player_white?.toString() === guest?._id.toString() || game.player_black?.toString() === guest?._id.toString()));
       const status = game.game_state.status;
-  
+
       if (!isPlayer && status !== 'waiting_for_opponent') {
         return res.status(403).json({ message: 'You are not a player in this game' });
       }
-  
+
       console.log('Game retrieved successfully');
       return res.status(200).json({
         message: 'Game retrieved successfully',
@@ -151,7 +151,7 @@ export class ChessController {
     try {
       const user: any = req.user;
       const guest: Guest = req.guest;
-    
+
       const { gameId } = req.params;
       const { game_state: gameState, version } = req.body as { game_state: GameState; version: number };
 

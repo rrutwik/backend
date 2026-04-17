@@ -8,6 +8,7 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import createClient from "ioredis";
 import { User } from "./interfaces/users.interface";
 import { Guest } from "./interfaces/guest.interface";
+import { GameState } from "./interfaces/chessgame.interface";
 import { logger } from "./utils/logger";
 
 declare module "socket.io" {
@@ -68,20 +69,20 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
   io.use(socketAuthAdapter);
 
   const pubClient = new createClient({
-      host: process.env.REDIS_HOST,
-      port: Number(process.env.REDIS_PORT || 6379),
-      db: 12,
-      lazyConnect: true,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: true,
-    });
-    const subClient = pubClient.duplicate();
+    host: process.env.REDIS_HOST,
+    port: Number(process.env.REDIS_PORT || 6379),
+    db: 12,
+    lazyConnect: true,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: true,
+  });
+  const subClient = pubClient.duplicate();
 
-    await pubClient.connect();
-    await subClient.connect();
+  await pubClient.connect();
+  await subClient.connect();
 
-    io.adapter(createAdapter(pubClient, subClient));
-    logger.info("Redis adapter initialized for Socket.IO");
+  io.adapter(createAdapter(pubClient, subClient));
+  logger.info("Redis adapter initialized for Socket.IO");
 
   io.on("connection", (socket: Socket) => {
     const user = socket.data.user;
@@ -115,6 +116,22 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
         logger.error("join_game error:", err);
         socket.emit("error", { message: "Failed to join game" });
         socket.disconnect();
+      }
+    });
+
+    // Update game state
+    socket.on("update_game_state", async (payload: { gameId: string, version: number, game_state: GameState }) => {
+      try {
+        const { gameId, version, game_state } = payload;
+        const updatedGame = await chessService.updateGameState(gameId, version, game_state, user, guest);
+        io.to(`game:${gameId}`).emit("game_updated", {
+          gameId,
+          data: updatedGame,
+        });
+        logger.info(`Game state updated via socket for game:${gameId}`);
+      } catch (err) {
+        logger.error("update_game_state error:", err);
+        socket.emit("error", { message: "Failed to update game state" });
       }
     });
 
