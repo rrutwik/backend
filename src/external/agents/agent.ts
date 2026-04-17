@@ -30,8 +30,8 @@ const redisUrl = process.env.REDIS_URL || "redis://127.0.0.1:6379";
 const client = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
   enableReadyCheck: true,
-  keyPrefix: "langchain",
-  db: 10
+  keyPrefix: "backend_redis_client_ai_agent:",
+  db: 0
 });
 
 let cacheClient = null;

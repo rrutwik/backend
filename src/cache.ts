@@ -16,7 +16,7 @@ class HybridCache {
   private memoryCache: LRUCache<CacheKey, unknown>;
   private redis: Redis;
 
-  constructor( redisUrl = "redis://127.0.0.1:6379", options?: CacheOptions) {
+  constructor(redisUrl = "redis://127.0.0.1:6379", options?: CacheOptions) {
     this.memoryCache = new LRUCache<CacheKey, unknown>({
       ttl: options?.ttl ?? DEFAULT_TTL_MS,
       max: options?.max ?? DEFAULT_MAX_ITEMS,
@@ -27,6 +27,7 @@ class HybridCache {
 
     this.redis = new Redis(redisUrl, {
       db: 0,
+      keyPrefix: "backend_redis_cache:",
       maxRetriesPerRequest: null,
       enableReadyCheck: true,
     });
