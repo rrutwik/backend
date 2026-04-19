@@ -30,7 +30,7 @@ export class ChessController {
         display_name: guestSession.display_name,
       });
     } catch (error) {
-      logger.error('Error creating guest session:', error);
+      logger.error(`Error creating guest session:, ${error}`);
       next(error);
     }
   }
@@ -65,7 +65,7 @@ export class ChessController {
         data: game
       });
     } catch (error) {
-      logger.error('Error creating chess game:', error);
+      logger.error(`Error creating chess game:, ${error}`);
       next(error);
     }
   };
@@ -95,7 +95,7 @@ export class ChessController {
         data: game
       });
     } catch (error) {
-      logger.error('Error registering opponent:', error);
+      logger.error(`Error registering opponent:, ${error}`);
       next(error);
     }
   };
@@ -130,7 +130,7 @@ export class ChessController {
         data: game
       });
     } catch (error) {
-      logger.error('Error getting chess game:', error);
+      logger.error(`Error getting chess game:, ${error}`);
       next(error);
     }
   };
@@ -150,7 +150,7 @@ export class ChessController {
         data: games
       });
     } catch (error) {
-      logger.error('Error getting active games:', error);
+      logger.error(`Error getting active games:, ${error}`);
       next(error);
     }
   };
@@ -187,7 +187,7 @@ export class ChessController {
         data: updatedGame
       });
     } catch (error) {
-      logger.error('Error updating game state:', error);
+      logger.error(`Error updating game state:, ${error}`);
       next(error);
     }
   };
@@ -217,7 +217,7 @@ export class ChessController {
         data: updatedGame
       });
     } catch (error) {
-      logger.error('Error ending game:', error);
+      logger.error(`Error ending game:, ${error}`);
       next(error);
     }
   };
@@ -242,7 +242,7 @@ export class ChessController {
         data: updatedGame
       });
     } catch (error) {
-      logger.error('Error abandoning game:', error);
+      logger.error(`Error abandoning game:, ${error}`);
       next(error);
     }
   };
@@ -263,7 +263,7 @@ export class ChessController {
         data: games
       });
     } catch (error) {
-      logger.error('Error getting game history:', error);
+      logger.error(`Error getting game history:, ${error}`);
       next(error);
     }
   };

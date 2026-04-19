@@ -66,7 +66,7 @@ export class ChessService {
       logger.info(`Guest session created: ${guestSession.session_uuid} (${display_name})`);
       return guestSession.toJSON();
     } catch (error) {
-      logger.error('Error creating guest session:', error);
+      logger.error(`Error creating guest session:, ${error}`);
       throw error;
     }
   }
@@ -96,7 +96,7 @@ export class ChessService {
         }
       }
     } catch (err) {
-      logger.error('Error resolving display name:', err);
+      logger.error(`Error resolving display name:, ${err}`);
     }
     return fallbackName;
   }
@@ -138,7 +138,7 @@ export class ChessService {
       logger.info(`Chess game created: ${game.game_id} by ${playerId} (${isGuest ? 'guest' : 'user'}) as ${playerColor}`);
       return game.toJSON();
     } catch (error) {
-      logger.error('Error creating chess game:', error);
+      logger.error(`Error creating chess game:, ${error}`);
       throw error;
     }
   }
@@ -185,7 +185,7 @@ export class ChessService {
       logger.info(`Matchmade game created: ${game.game_id} — white:${whiteId}(${game.player_white_name}) black:${blackId}(${game.player_black_name})`);
       return game.toJSON();
     } catch (error) {
-      logger.error('Error creating matchmade game:', error);
+      logger.error(`Error creating matchmade game:, ${error}`);
       throw error;
     }
   }
@@ -290,7 +290,7 @@ export class ChessService {
       logger.info(`Drew ${drawCount} cards for game ${gameId} by player ${playerId}`);
       return updatedGame.toJSON();
     } catch (error) {
-      logger.error('Error drawing cards:', error);
+      logger.error(`Error drawing cards:, ${error}`);
       throw error;
     }
   }
@@ -349,7 +349,7 @@ export class ChessService {
 
       return updatedGame.toJSON();
     } catch (error) {
-      logger.error('Error registering opponent:', error);
+      logger.error(`Error registering opponent:, ${error}`);
       throw error;
     }
   }
@@ -362,7 +362,7 @@ export class ChessService {
       }
       return game.toJSON();
     } catch (error) {
-      logger.error('Error fetching chess game:', error);
+      logger.error(`Error fetching chess game:, ${error}`);
       throw error;
     }
   }
@@ -380,7 +380,7 @@ export class ChessService {
 
       return games.map(game => game.toJSON());
     } catch (error) {
-      logger.error('Error fetching active games for player:', error);
+      logger.error(`Error fetching active games for player:, ${error}`);
       throw error;
     }
   }
@@ -419,7 +419,7 @@ export class ChessService {
 
       // Perform atomic update with version increment
       const finalGameState = { ...game.game_state, ...sanitizedState, check_attempts: 0 };
-      
+
       const updatedGame = await ChessGameModel.findOneAndUpdate(
         { game_id: gameId, version }, // must match old version
         {
@@ -437,7 +437,7 @@ export class ChessService {
       logger.info(`Game ${gameId} state updated by ${currentPlayerId}`);
       return updatedGame.toJSON();
     } catch (error) {
-      logger.error('Error updating chess game state:', error);
+      logger.error(`Error updating chess game state:, ${error}`);
       throw error;
     }
   }
@@ -468,7 +468,7 @@ export class ChessService {
 
       return updatedGame.toJSON();
     } catch (error) {
-      logger.error('Error ending chess game:', error);
+      logger.error(`Error ending chess game:, ${error}`);
       throw error;
     }
   }
@@ -498,7 +498,7 @@ export class ChessService {
 
       return updatedGame.toJSON();
     } catch (error) {
-      logger.error('Error abandoning chess game:', error);
+      logger.error(`Error abandoning chess game:, ${error}`);
       throw error;
     }
   }
@@ -517,7 +517,7 @@ export class ChessService {
 
       return games.map(game => game.toJSON());
     } catch (error) {
-      logger.error('Error fetching game history:', error);
+      logger.error(`Error fetching game history:, ${error}`);
       throw error;
     }
   }
