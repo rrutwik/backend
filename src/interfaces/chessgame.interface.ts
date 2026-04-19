@@ -1,12 +1,26 @@
 import { ObjectId } from "mongoose";
 
+
+export interface MoveHistory {
+  cards: PlayingCard[]; // Multiple cards drawn
+  usedCard?: PlayingCard; // Which card was actually used for this move
+  move?: {
+    from: string;
+    to: string;
+    piece: string;
+  },
+  player: "white" | "black";
+  isFailedAttempt?: boolean; // For tracking failed check escape attempts
+}
+
+
 export interface GameState {
   fen: string;
   pgn?: string;
   turn: 'white' | 'black';
   status: 'waiting_for_opponent' | 'active' | 'completed' | 'abandoned';
   winner?: 'white' | 'black' | 'draw';
-  moves?: string[];
+  moves?: MoveHistory[];
   current_card?: string;
   current_cards?: string[];
   check_attempts?: number;

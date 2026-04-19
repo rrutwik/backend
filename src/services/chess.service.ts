@@ -1,5 +1,5 @@
 import Container, { Service } from 'typedi';
-import { ChessGame, GameState, PlayingCard } from '@/interfaces/chessgame.interface';
+import { ChessGame, GameState, MoveHistory, PlayingCard } from '@/interfaces/chessgame.interface';
 import { ChessGameModel } from '@/models/chess_games.model';
 import { HttpException } from '@/exceptions/HttpException';
 import { logger } from '@/utils/logger';
@@ -247,6 +247,17 @@ export class ChessService {
           isCheckmateLoss = true;
         }
       }
+      const newMoveHistory: MoveHistory[] = game.game_state.moves || [];
+      const lastColor = newMoveHistory.length > 0 ? newMoveHistory[newMoveHistory.length - 1].player : 'black';
+      if (lastColor === playerColor) {
+        const previousDrawnCards = newMoveHistory[newMoveHistory.length - 1].cards;
+        newMoveHistory.push({
+          cards: previousDrawnCards,
+          usedCard: null,
+          player: playerColor,
+          isFailedAttempt: true
+        });
+      }
 
       // Automatically terminate game if they've exceeded their check attempts
       if (isCheckmateLoss) {
@@ -255,6 +266,7 @@ export class ChessService {
           { game_id: gameId },
           {
             $set: {
+              'game_state.moves': newMoveHistory,
               'game_state.status': 'completed',
               'game_state.winner': winnerColor,
               'game_state.check_attempts': newCheckAttempts
@@ -274,6 +286,7 @@ export class ChessService {
         { game_id: gameId },
         {
           $set: {
+            'game_state.moves': newMoveHistory,
             'game_state.current_cards': drawnCards,
             'game_state.cards_deck': deck,
             'game_state.check_attempts': newCheckAttempts,
