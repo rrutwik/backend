@@ -3,7 +3,7 @@ import { ObjectId } from "mongoose";
 
 export interface MoveHistory {
   cards: PlayingCard[]; // Multiple cards drawn
-  usedCard?: PlayingCard; // Which card was actually used for this move
+  usedCard: PlayingCard; // Which card was actually used for this move
   move?: {
     from: string;
     to: string;

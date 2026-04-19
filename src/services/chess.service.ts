@@ -13,6 +13,7 @@ import { User } from '@/interfaces/users.interface';
 import { generateGuestName } from '@/utils/guestNames';
 import { UserProfileModel } from '@/models/user_profile.model';
 import { Chess } from 'chess.js';
+import { getValidMovesForMultipleCards } from '@/utils/chess';
 
 type Suit = 'hearts' | 'diamonds' | 'clubs' | 'spades' | 'joker';
 type CardColor = 'red' | 'black';
@@ -190,10 +191,6 @@ export class ChessService {
     }
   }
 
-  /**
-   * Draws N cards from the deck for the current player.
-   * The deck and current_cards are updated atomically in the DB.
-   */
   public async drawCards(gameId: string, user?: User, guest?: Guest): Promise<ChessGame> {
     try {
       const gameModel = await ChessGameModel.findOne({ game_id: gameId });
@@ -207,7 +204,6 @@ export class ChessService {
         throw new HttpException(400, 'Game is not active');
       }
 
-      // Verify the requester is a player
       const playerId = user?._id?.toString() || guest?._id?.toString();
       const isPlayerWhite = game.player_white?.toString() === playerId;
       const isPlayerBlack = game.player_black?.toString() === playerId;
@@ -215,18 +211,15 @@ export class ChessService {
         throw new HttpException(403, 'You are not a player in this game');
       }
 
-      // Verify it's this player's turn
       const playerColor = isPlayerWhite ? 'white' : 'black';
       if (!game.is_vs_bot && game.game_state.turn !== playerColor) {
         throw new HttpException(400, `It's not your turn. Current turn: ${game.game_state.turn}`);
       }
 
       const deck: DeckCard[] = [...(game.game_state.cards_deck as DeckCard[] || [])];
-      // Use explicit count or fall back to the game's configured cards_to_draw
       const drawCount = game.cards_to_draw;
 
-      // If deck is running low, append a new shuffled deck
-      if (deck.length < drawCount + 5) {
+      if (deck.length < drawCount + 10) {
         const refill = createShuffledDeck();
         deck.push(...refill);
         logger.info(`Deck refilled for game ${gameId}`);
@@ -236,31 +229,28 @@ export class ChessService {
         throw new HttpException(400, 'Not enough cards in deck');
       }
 
-      // Backend native Check evaluation tracking
       const chess = new Chess(game.game_state.fen);
       let isCheckmateLoss = false;
       let newCheckAttempts = game.game_state.check_attempts || 0;
 
       if (chess.inCheck()) {
         newCheckAttempts += 1;
-        if (newCheckAttempts > 5) {
+        if (newCheckAttempts >= 5) {
           isCheckmateLoss = true;
         }
       }
+      const drawnCards = deck.splice(deck.length - drawCount, drawCount);
+      const validMoves = getValidMovesForMultipleCards(chess, drawnCards);
       const newMoveHistory: MoveHistory[] = game.game_state.moves || [];
-      const lastColor = newMoveHistory.length > 0 ? newMoveHistory[newMoveHistory.length - 1].player : 'black';
-      if (lastColor === playerColor) {
-        const previousDrawnCards = newMoveHistory[newMoveHistory.length - 1].cards;
+      if (validMoves.length === 0) {
         newMoveHistory.push({
-          cards: previousDrawnCards,
-          usedCard: null,
+          cards: drawnCards,
+          usedCard: drawnCards[0],
           player: playerColor,
-          isFailedAttempt: true
+          isFailedAttempt: true,
         });
       }
-
-      // Automatically terminate game if they've exceeded their check attempts
-      if (isCheckmateLoss) {
+      if (isCheckmateLoss && validMoves.length === 0) {
         const winnerColor = game.game_state.turn === 'white' ? 'black' : 'white';
         const checkmatedGame = await ChessGameModel.findOneAndUpdate(
           { game_id: gameId },
@@ -278,9 +268,6 @@ export class ChessService {
         logger.info(`Game over by check attempt limit for game ${gameId}`);
         return checkmatedGame!.toJSON();
       }
-
-      // Pop drawCount cards from the end of the deck
-      const drawnCards = deck.splice(deck.length - drawCount, drawCount);
 
       const updatedGame = await ChessGameModel.findOneAndUpdate(
         { game_id: gameId },

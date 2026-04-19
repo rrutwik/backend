@@ -4,17 +4,6 @@ import crypto from 'crypto';
 const SUITS: Suit[] = ['hearts', 'diamonds', 'clubs', 'spades'];
 const VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 
-export interface MoveHistory {
-  card: PlayingCard;
-  move?: {
-    from: string;
-    to: string;
-    piece: string;
-  },
-  player: "white" | "black";
-  isFailedAttempt?: boolean; // For tracking failed check escape attempts
-}
-
 export function createDeck(): PlayingCard[] {
   const cards: PlayingCard[] = [];
 
