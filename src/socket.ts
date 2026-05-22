@@ -72,12 +72,13 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
     cors: {
       origin: process.env.ORIGINS?.split(",") || "*",
       credentials: true,
-    },
-    transports: ["websocket"]
+    }
   });
 
   io.use(socketAuthAdapter);
-
+  io.of("/").adapter.on("error", (err) => {
+    logger.error("Redis adapter error:", err);
+  });
   const pubClient = new createClient({
     host: process.env.REDIS_HOST,
     port: Number(process.env.REDIS_PORT || 6379),

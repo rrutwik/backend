@@ -13,7 +13,7 @@ const broadcastMatchmakingCount = async (io: Server) => {
 export const initMatchmakingWorker = (io: Server, chessService: ChessService) => {
   const worker = new Worker(MATCHMAKING_QUEUE_NAME, async () => {
     try {
-      logger.debug("Matchmaking worker started");
+      // logger.debug("Matchmaking worker started");
       const lock = await queueClient.set("matchmaking:lock", "1", "PX", 4000, "NX");
       if (!lock) return;
 
@@ -23,13 +23,13 @@ export const initMatchmakingWorker = (io: Server, chessService: ChessService) =>
           io.to(player.socketId).emit("matchmaking_timeout", { message: "No opponent found. Please try again." });
           logger.info(`Matchmaking timeout for player ${player.playerId}`);
         }
-        logger.debug(`Matchmaking timeout for ${expiredPlayers.length} players`);
+        // logger.debug(`Matchmaking timeout for ${expiredPlayers.length} players`);
         await broadcastMatchmakingCount(io);
       }
 
       while (true) {
         const pair = await popTwoPlayers(queueClient);
-        logger.debug(`Pair found: ${pair}`);
+        // logger.debug(`Pair found: ${pair}`);
         if (!pair) break;
 
         const [entry1, entry2] = pair;

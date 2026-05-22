@@ -9,14 +9,14 @@ const ABANDON_TIMEOUT_MS = 60 * 1000; // 60 seconds
 export const initAutoAbandonWorker = (io: Server) => {
   const worker = new Worker(AUTO_ABANDON_QUEUE_NAME, async () => {
     try {
-      logger.debug("Auto-abandon worker started");
+      // logger.debug("Auto-abandon worker started");
       const thresholdTime = new Date(Date.now() - ABANDON_TIMEOUT_MS);
 
       const staleGames = await ChessGameModel.find({
         'game_state.status': 'active',
         updatedAt: { $lt: thresholdTime }
       });
-      logger.debug(`Found ${staleGames.length} stale games`);
+      // logger.debug(`Found ${staleGames.length} stale games`);
       if (staleGames.length === 0) return;
 
       for (const game of staleGames) {

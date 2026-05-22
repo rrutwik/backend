@@ -10,7 +10,7 @@ module.exports = {
       name: 'prod',
       script: 'dist/server.js',
       exec_mode: 'cluster',
-      instances: 2,
+      instances: 1,
       autorestart: true,
       watch: false,
       wait_ready: true,
