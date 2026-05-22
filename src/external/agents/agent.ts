@@ -44,9 +44,6 @@ function getCacheClient() {
   return cacheClient;
 }
 
-console.log({
-  OPENAI_MODEL_NAME
-})
 
 export class Agent {
   private chatGPTModel = new ChatOpenAI({

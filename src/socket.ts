@@ -80,17 +80,20 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
   const pubClient = new createClient({
     host: process.env.REDIS_HOST,
     port: Number(process.env.REDIS_PORT || 6379),
-    db: 12,
     lazyConnect: true,
     maxRetriesPerRequest: null,
     enableReadyCheck: true,
   });
+
   const subClient = pubClient.duplicate();
 
   await pubClient.connect();
   await subClient.connect();
 
-  io.adapter(createAdapter(pubClient, subClient));
+  io.adapter(createAdapter(pubClient, subClient, {
+    key: "backend_socket.io-redis-adapter",
+  }));
+
   logger.info("Redis adapter initialized for Socket.IO");
 
   io.on("connection", (socket: Socket) => {
@@ -98,7 +101,7 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
     const guest: Guest = socket.data.guest;
     const playerId = user?._id?.toString() || guest?._id?.toString();
 
-    logger.info(`Socket connected: ${socket.id}`, user ? `User:${user._id}` : `Guest:${guest?._id}`);
+    logger.info(`Socket connected: ${socket.id}`, user ? `User:${user._id}` : `Guest:${guest?._id} process PID:${process.pid}`);
 
     // ── Join a game ────────────────────────────────────────────────────────
     socket.on("join_game", async (_game: { gameId: string }) => {
