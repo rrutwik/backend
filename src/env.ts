@@ -8,6 +8,7 @@ export const env = cleanEnv(process.env, {
   PORT: port({ default: 3000 }),
   CREDENTIALS: bool({ default: true }),
   SECRET_KEY: str({ default: 'secretKey' }),
+  ADMIN_API_KEY: str(),
   LOG_FORMAT: str({ default: 'dev' }),
   LOG_DIR: str({ default: '../logs' }),
   ORIGINS: str({ default: '*' }),

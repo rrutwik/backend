@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "API Server",
   "author": "TechKarmic Ventures",
   "license": "ISC",
@@ -12,9 +12,9 @@
     "test": "jest --forceExit --detectOpenHandles",
     "lint": "eslint --ignore-path .gitignore --ext .ts src/",
     "lint:fix": "npm run lint -- --fix",
-    "deploy": "npm run build && pm2 start ecosystem.config.js --only prod",
-    "stop": "pm2 stop prod",
-    "restart": "npm run build && pm2 reload prod --update-env"
+    "deploy": "npm run build && pm2 start ecosystem.config.js",
+    "stop": "pm2 stop backend",
+    "restart": "npm run build && pm2 reload backend --update-env"
   },
   "dependencies": {
     "@langchain/core": "1.1.48",

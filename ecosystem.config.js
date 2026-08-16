@@ -7,7 +7,7 @@
 module.exports = {
   apps: [
     {
-      name: 'prod',
+      name: 'backend',
       script: 'dist/server.js',
       exec_mode: 'cluster',
       instances: 2,
