@@ -38,15 +38,16 @@ export class IFSCService {
     } = params;
 
     const filter: any = {};
+    let usesTextSearch = false; // <-- track this
 
     if (q && q.trim()) {
       const cleaned = this.sanitizeTextQuery(q.trim());
 
-      // If the query looks like an IFSC code, do a regex prefix search
       if (/^[A-Z0-9]{4}0[A-Z0-9]{6}$/i.test(q)) {
         filter.ifsc = { $regex: `^${q.trim()}`, $options: 'i' };
       } else {
         filter.$text = { $search: cleaned || q.trim() };
+        usesTextSearch = true; // <-- only true here
       }
     }
 
@@ -64,10 +65,11 @@ export class IFSCService {
       await cache.set(cacheKey, total, 60 * 60 * 24 * 7);
     }
     total = parseInt(total as string);
+
     const records = await IFSCCodeModel.find(filter)
       .skip(offset)
       .limit(limit)
-      .sort(q ? { score: { $meta: 'textScore' } } : { bank: 1, city: 1, branch: 1 })
+      .sort(usesTextSearch ? { score: { $meta: 'textScore' } } : { bank: 1, city: 1, branch: 1 })
       .select({
         _id: 0,
         ifsc: 1,
@@ -87,7 +89,7 @@ export class IFSCService {
         rtgs: 1,
         upi: 1,
         type: 1,
-        ...(q ? { score: { $meta: 'textScore' } } : {}),
+        ...(usesTextSearch ? { score: { $meta: 'textScore' } } : {}),
       });
 
     return { records, total, limit, offset };
