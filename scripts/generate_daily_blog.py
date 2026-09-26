@@ -1,12 +1,195 @@
+#!/usr/bin/env python3
 import os
 import json
 import sys
+import atexit
 import logging
+import random
 import requests
 import xml.etree.ElementTree as ET
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List
+
+class GateStateTracker:
+    """
+    Hooks interpreter exit to automatically mark the run as completed in the
+    state file only if the pipeline finished successfully (no exit code != 0 or unhandled exceptions).
+    """
+    def __init__(self, last_run_file: str, today_str: str, log_file: str, tz: timezone):
+        self.last_run_file = last_run_file
+        self.today_str = today_str
+        self.log_file = log_file
+        self.tz = tz
+        self.failed = False
+
+        self._orig_exit = sys.exit
+        sys.exit = self._hook_exit
+        self._orig_excepthook = sys.excepthook
+        sys.excepthook = self._hook_exception
+        atexit.register(self._on_exit)
+
+    def _hook_exit(self, code=0):
+        if code != 0:
+            self.failed = True
+        self._orig_exit(code)
+
+    def _hook_exception(self, tp, val, tb):
+        self.failed = True
+        self._orig_excepthook(tp, val, tb)
+
+    def _on_exit(self):
+        if not self.failed:
+            try:
+                with open(self.last_run_file, "w") as f:
+                    f.write(self.today_str + "\n")
+                now_str = datetime.now(self.tz).strftime("%Y-%m-%d %H:%M:%S IST")
+                with open(self.log_file, "a") as f:
+                    f.write(f"[{now_str}] Task executed successfully. Marked {self.today_str} as completed in {os.path.basename(self.last_run_file)}.\n")
+            except Exception as e:
+                sys.stderr.write(f"Error updating completion state file {self.last_run_file}: {e}\n")
+
+
+def run_gate():
+    """
+    Gate check designed for 5-minute cron triggers (*/5 * * * *).
+    Features:
+    - Safe against server restarts: no sleep calls, purely state-file-based.
+    - Alternate-day check based on epoch day difference.
+    - Random target execution time between window_start_time and window_end_time (IST), persisted to file.
+    - Executes task once current time >= target time, then marks date as completed upon success.
+    - Meaningful state transitions logged to run.log with timestamps; recurring checks exit quietly.
+    """
+    # --- Configurable Variables ---
+    interval_days = 2
+    window_start_time = "09:00"  # Format HH:MM (IST)
+    window_end_time = "15:00"    # Format HH:MM (IST)
+
+    # IST Timezone (UTC+05:30)
+    ist = timezone(timedelta(hours=5, minutes=30))
+    epoch_date = datetime(1970, 1, 1).date()
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    last_run_file = os.path.join(script_dir, ".last_run_date")
+    target_time_file = os.path.join(script_dir, ".today_target_time")
+    gate_state_file = os.path.join(script_dir, ".last_gate_state")
+    log_file = os.path.join(script_dir, "run.log")
+
+    now_ist = datetime.now(ist)
+    today_ist = now_ist.date()
+    today_str = today_ist.strftime("%Y-%m-%d")
+    now_str = now_ist.strftime("%Y-%m-%d %H:%M:%S IST")
+    now_time_str = now_ist.strftime("%H:%M:%S")
+
+    def _log(msg: str):
+        try:
+            with open(log_file, "a") as f:
+                f.write(msg + "\n")
+        except Exception as e:
+            sys.stderr.write(f"Failed writing to {log_file}: {e}\n")
+
+    def _save_state(state: str):
+        try:
+            with open(gate_state_file, "w") as f:
+                f.write(state.strip() + "\n")
+        except Exception as e:
+            sys.stderr.write(f"Failed writing to {gate_state_file}: {e}\n")
+
+    last_gate_state = ""
+    if os.path.exists(gate_state_file):
+        try:
+            with open(gate_state_file, "r") as f:
+                last_gate_state = f.read().strip()
+        except Exception:
+            pass
+
+    today_epoch_day = (today_ist - epoch_date).days
+
+    # 1. Alternate-day check
+    if os.path.exists(last_run_file):
+        try:
+            with open(last_run_file, "r") as f:
+                last_run_str = f.read().strip()
+            if last_run_str:
+                last_run_date = datetime.strptime(last_run_str, "%Y-%m-%d").date()
+                last_run_epoch_day = (last_run_date - epoch_date).days
+                diff_days = today_epoch_day - last_run_epoch_day
+
+                # If today's task is already marked complete, exit quietly
+                if last_run_str == today_str:
+                    sys.exit(0)
+
+                # If fewer than interval_days have passed since last run, exit
+                if diff_days < interval_days:
+                    not_due_state = f"NOT_DUE:{today_str}"
+                    if last_gate_state != not_due_state:
+                        _log(f"[{now_str}] Skipped: Not due today (only {diff_days} day(s) passed since last run on {last_run_str}; interval is {interval_days} days).")
+                        _save_state(not_due_state)
+                    sys.exit(0)
+        except SystemExit:
+            raise
+        except Exception:
+            # If reading state file fails, proceed to target time check
+            pass
+
+    # 2. Random target time selection (persisted for the day)
+    target_date_str = None
+    target_time_str = None
+    if os.path.exists(target_time_file):
+        try:
+            with open(target_time_file, "r") as f:
+                parts = f.read().strip().split()
+                if len(parts) >= 2:
+                    target_date_str, target_time_str = parts[0], parts[1]
+        except Exception:
+            pass
+
+    # If no target time has been picked yet for today, generate one
+    if target_date_str != today_str:
+        try:
+            start_h, start_m = map(int, window_start_time.split(":"))
+            end_h, end_m = map(int, window_end_time.split(":"))
+            start_sec = start_h * 3600 + start_m * 60
+            end_sec = end_h * 3600 + end_m * 60
+
+            random_sec = random.randint(start_sec, end_sec)
+            target_time_str = f"{random_sec // 3600:02d}:{(random_sec % 3600) // 60:02d}:{random_sec % 60:02d}"
+
+            with open(target_time_file, "w") as f:
+                f.write(f"{today_str} {target_time_str}\n")
+
+            _log(f"[{now_str}] Target time for {today_str} picked: {target_time_str} IST (window: {window_start_time}-{window_end_time} IST).")
+        except Exception as e:
+            sys.stderr.write(f"Failed generating target time: {e}\n")
+            target_time_str = f"{window_start_time}:00"
+
+    try:
+        target_dt = datetime.strptime(f"{today_str} {target_time_str}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=ist)
+    except Exception:
+        target_dt = datetime.strptime(f"{today_str} {target_time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=ist)
+
+    # 3. Execution check
+    if now_ist < target_dt:
+        waiting_state = f"WAITING:{today_str}:{target_time_str}"
+        if last_gate_state != waiting_state:
+            _log(f"[{now_str}] Skipped: Waiting for target time ({target_time_str} IST), current time is {now_time_str} IST.")
+            _save_state(waiting_state)
+        # Exit quietly with no action
+        sys.exit(0)
+
+    # Current time >= target time: proceed with execution
+    exec_state = f"EXECUTING:{today_str}"
+    if last_gate_state != exec_state:
+        _log(f"[{now_str}] Executing task: Current time ({now_time_str} IST) has reached target time ({target_time_str} IST).")
+        _save_state(exec_state)
+
+    # Arm completion tracker to update .last_run_date only upon successful execution
+    GateStateTracker(last_run_file, today_str, log_file, ist)
+
+
+# Call gate function near top of script
+run_gate()
+
 
 # Configure production-style logging
 logging.basicConfig(
