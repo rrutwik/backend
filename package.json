@@ -67,7 +67,7 @@
     "@types/node": "17.0.45",
     "@typescript-eslint/eslint-plugin": "8.60.1",
     "@typescript-eslint/parser": "8.60.1",
-    "cross-env": "7.0.3",
+    "cross-env": "10.1.0",
     "eslint": "10.0.0",
     "eslint-config-prettier": "8.5.0",
     "eslint-plugin-prettier": "4.2.1",
