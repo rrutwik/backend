@@ -28,7 +28,7 @@
     "chess.js": "1.4.0",
     "class-transformer": "0.5.1",
     "class-validator": "0.14.0",
-    "compression": "1.8.1",
+    "compression": "1.8.2",
     "cookie-parser": "1.4.7",
     "cors": "2.8.6",
     "dotenv": "17.4.2",
@@ -55,7 +55,7 @@
   },
   "devDependencies": {
     "@types/bcrypt": "5.0.0",
-    "@types/compression": "1.7.2",
+    "@types/compression": "1.8.1",
     "@types/cookie-parser": "1.4.10",
     "@types/cors": "2.8.19",
     "@types/express": "4.17.21",
