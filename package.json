@@ -46,7 +46,7 @@
     "morgan": "1.11.0",
     "razorpay": "2.9.6",
     "reflect-metadata": "0.1.13",
-    "socket.io": "4.8.3",
+    "socket.io": "4.8.4",
     "swagger-ui-express": "4.5.0",
     "typedi": "0.10.0",
     "uuid": "14.0.0",
