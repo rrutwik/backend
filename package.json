@@ -40,7 +40,7 @@
     "ioredis": "5.10.1",
     "jsonwebtoken": "9.0.3",
     "lodash": "4.17.23",
-    "lru-cache": "11.1.0",
+    "lru-cache": "11.5.3",
     "moment-timezone": "0.6.0",
     "mongoose": "8.24.1",
     "morgan": "1.11.0",
