@@ -1,5 +1,6 @@
 import { model, Schema, Document } from 'mongoose';
 import { ChessGame } from '@/interfaces/chessgame.interface';
+import { logger } from '@/utils/logger';
 
 const GameStateSchema = new Schema({
   fen: {
@@ -94,6 +95,11 @@ const ChessGameSchema: Schema = new Schema({
     required: true,
     default: 0
   },
+  // Was assigned in the service but missing from the schema, so mongoose silently dropped it
+  // and getGameHistory's sort on it never worked.
+  completed_at: {
+    type: Date,
+  },
   game_state: {
     type: GameStateSchema,
     required: true,
@@ -114,5 +120,9 @@ const ChessGameSchema: Schema = new Schema({
 ChessGameSchema.index({ player_white: 1, 'game_state.status': 1 });
 ChessGameSchema.index({ player_black: 1, 'game_state.status': 1 });
 ChessGameSchema.index({ createdAt: -1 });
+// Used by the auto-abandon sweep (status = 'active' AND updatedAt < threshold), which runs every 10s.
+ChessGameSchema.index({ 'game_state.status': 1, updatedAt: 1 });
 export const ChessGameModel = model<ChessGame & Document>('chess_game', ChessGameSchema);
-ChessGameModel.syncIndexes({ background: true });
+ChessGameModel.syncIndexes({ background: true }).catch((err) => {
+  logger.error(`Failed to sync chess_games indexes: ${err}`);
+});

@@ -104,8 +104,11 @@ initSocket(app.server, chessService)
 
     app.listen();
 
-    // Only run BullMQ in primary instance
-    if (!process.env.INSTANCE_ID || process.env.INSTANCE_ID === '0') {
+    // Only run BullMQ in the primary instance.
+    // PM2 cluster mode exposes the instance number as NODE_APP_INSTANCE (INSTANCE_ID is never set by PM2,
+    // so the old check was always true and every instance ran its own workers).
+    const instanceId = process.env.NODE_APP_INSTANCE ?? process.env.INSTANCE_ID;
+    if (!instanceId || instanceId === '0') {
       await initBullMQ(io, chessService);
     }
 

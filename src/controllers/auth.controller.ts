@@ -112,8 +112,6 @@ export class AuthController {
           avatar: avatar,
           language: language
         }
-      }, {
-        new: true
       })
       await this.userService.clearUserProfileCache(user._id);
       const updatedUserProfile = await this.userService.getUserProfile(user._id);

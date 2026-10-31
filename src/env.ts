@@ -21,8 +21,6 @@ export const env = cleanEnv(process.env, {
   DB_PASSWORD: str({ default: 'password' }),
 
   REDIS_URL: str({ default: 'redis://127.0.0.1:6379' }),
-  REDIS_HOST: str({ default: '127.0.0.1' }),
-  REDIS_PORT: port({ default: 6379 }),
 
   RAZORPAY_KEY: str({ default: '' }),
   RAZORPAY_SECRET: str({ default: '' }),

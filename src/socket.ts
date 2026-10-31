@@ -10,9 +10,11 @@ import { User } from "./interfaces/users.interface";
 import { Guest } from "./interfaces/guest.interface";
 import { GameState } from "./interfaces/chessgame.interface";
 import { logger } from "./utils/logger";
-import { UserProfileModel } from "./models/user_profile.model";
-import { enqueuePlayer, dequeueByPlayerId, getQueueCount } from "./utils/matchmaking";
+import { env } from "./env";
+import { toClientGame } from "./utils/chessGame";
+import { enqueuePlayer, dequeueByPlayerId, dequeueIfSocket, getQueueCount } from "./utils/matchmaking";
 import { queueClient } from "./jobs/connection";
+import { broadcastMatchmakingCount, triggerMatchmaking, MATCHMAKING_LOBBY_ROOM } from "./services/matchmaking.service";
 
 declare module "socket.io" {
   interface SocketData {
@@ -61,11 +63,6 @@ export const socketAuthAdapter = async (socket: Socket, next: (err?: Error) => v
   }
 };
 
-const broadcastMatchmakingCount = async (io: Server) => {
-  const count = await getQueueCount(queueClient);
-  io.emit("matchmaking_count", { count });
-};
-
 // ─── Socket Server ────────────────────────────────────────────────────────────
 
 export const initSocket = async (server: HttpServer, chessService: ChessService) => {
@@ -86,9 +83,7 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
     });
   });
 
-  const pubClient = new createClient({
-    host: process.env.REDIS_HOST,
-    port: Number(process.env.REDIS_PORT || 6379),
+  const pubClient = new createClient(env.REDIS_URL, {
     lazyConnect: true,
     maxRetriesPerRequest: null,
     enableReadyCheck: true,
@@ -110,30 +105,29 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
     const guest: Guest = socket.data.guest;
     const playerId = user?._id?.toString() || guest?._id?.toString();
 
-    logger.info(`Socket connected: ${socket.id}`, user ? `User:${user._id}` : `Guest:${guest?._id} process PID:${process.pid}`);
+    logger.debug(`Socket connected: ${socket.id}`, user ? `User:${user._id}` : `Guest:${guest?._id} process PID:${process.pid}`);
 
     // ── Join a game ────────────────────────────────────────────────────────
     socket.on("join_game", async (_game: { gameId: string }) => {
       try {
         const gameId = _game.gameId;
-        const game = await chessService.getGameById(gameId);
-        const userId = user?._id;
-        const guestId = guest?._id;
+        // Only ids + status are needed here, not the whole game (deck, move history)
+        const game = await chessService.getGameParticipants(gameId);
+        const userId = user?._id?.toString();
+        const guestId = guest?._id?.toString();
 
         const isPlayer =
-          game.player_white?.toString() === userId?.toString() ||
-          game.player_black?.toString() === userId?.toString() ||
-          game.player_white?.toString() === guestId?.toString() ||
-          game.player_black?.toString() === guestId?.toString();
+          (!!userId && (game.player_white === userId || game.player_black === userId)) ||
+          (!!guestId && (game.player_white === guestId || game.player_black === guestId));
 
-        if (!isPlayer && game.game_state.status !== "waiting_for_opponent") {
+        if (!isPlayer && game.status !== "waiting_for_opponent") {
           socket.emit("error", { message: "You are not part of this game" });
           return socket.disconnect();
         }
 
         socket.join(`game:${gameId}`);
         socket.emit("joined_game", { gameId });
-        logger.info(`Socket ${socket.id} joined game:${gameId}`);
+        logger.debug(`Socket ${socket.id} joined game:${gameId}`);
       } catch (err) {
         logger.error("join_game error:", err);
         socket.emit("error", { message: "Failed to join game" });
@@ -148,12 +142,12 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
         const updatedGame = await chessService.updateGameState(gameId, version, game_state, user, guest);
         io.to(`game:${gameId}`).emit("game_updated", {
           gameId,
-          data: updatedGame,
+          data: toClientGame(updatedGame),
         });
-        logger.info(`Game state updated via socket for game:${gameId}`);
+        logger.debug(`Game state updated via socket for game:${gameId}`);
       } catch (err) {
         logger.error("update_game_state error:", err);
-        socket.emit("error", { message: "Failed to update game state" });
+        socket.emit("error", { message: (err as Error).message || "Failed to update game state", gameId: payload?.gameId });
       }
     });
 
@@ -163,18 +157,21 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
         const updatedGame = await chessService.drawCards(gameId, user, guest);
         io.to(`game:${gameId}`).emit("game_updated", {
           gameId,
-          data: updatedGame,
+          data: toClientGame(updatedGame),
         });
-        logger.info(`Cards drawn via socket for game:${gameId}`);
+        logger.debug(`Cards drawn via socket for game:${gameId}`);
       } catch (err) {
         logger.error("draw_card error:", err);
-        socket.emit("error", { message: (err as Error).message || "Failed to draw cards" });
+        socket.emit("error", { message: (err as Error).message || "Failed to draw cards", gameId: payload?.gameId });
       }
     });
 
-    socket.on("leave_game", (gameId: string) => {
+    // The web client sends { gameId }, older callers may send the bare id; accept both.
+    socket.on("leave_game", (payload: string | { gameId: string }) => {
+      const gameId = typeof payload === "string" ? payload : payload?.gameId;
+      if (!gameId) return;
       socket.leave(`game:${gameId}`);
-      logger.info(`Socket ${socket.id} left game:${gameId}`);
+      logger.debug(`Socket ${socket.id} left game:${gameId}`);
     });
 
     socket.on("join_matchmaking", async () => {
@@ -185,15 +182,8 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
         }
 
         const isGuest = !user && !!guest;
-        let displayName = '';
-        if (user) {
-          const userProfile = await UserProfileModel.findOne({ user_id: playerId });
-          displayName = userProfile?.first_name + ' ' + userProfile?.last_name;
-        } else if (guest) {
-          displayName = guest.display_name;
-        }
-        displayName = displayName || `Player_${playerId.slice(-6)}`;
 
+        socket.join(MATCHMAKING_LOBBY_ROOM);
         await enqueuePlayer(queueClient, {
           playerId,
           socketId: socket.id,
@@ -202,12 +192,14 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
         });
 
         logger.info(`Player ${playerId} joined matchmaking queue`);
-        await broadcastMatchmakingCount(io);
+        broadcastMatchmakingCount(io);
 
-
-        // Notify the user they are in the queue.
-        // Actual matching happens in the 5-second cron loop.
+        // Notify the user they are in the queue (before any match so events arrive in order).
         socket.emit("matchmaking_queued", { message: "Waiting for an opponent..." });
+
+        // Try to match right away. The periodic sweep in jobs/matchmaking.worker.ts remains
+        // as a fallback (queue timeouts, or another process holding the matchmaking lock).
+        void triggerMatchmaking(io, chessService);
       } catch (err) {
         logger.error("join_matchmaking error:", err);
         socket.emit("error", { message: "Failed to join matchmaking" });
@@ -218,9 +210,9 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
     socket.on("leave_matchmaking", async () => {
       try {
         if (!playerId) return;
-        await dequeueByPlayerId(queueClient, playerId);
+        const removed = await dequeueByPlayerId(queueClient, playerId);
         socket.emit("matchmaking_cancelled", {});
-        await broadcastMatchmakingCount(io);
+        if (removed) broadcastMatchmakingCount(io);
         logger.info(`Player ${playerId} left matchmaking queue`);
       } catch (err) {
         logger.error("leave_matchmaking error:", err);
@@ -230,6 +222,7 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
     // ── Get current matchmaking count ─────────────────────────────────────
     socket.on("get_matchmaking_count", async () => {
       try {
+        socket.join(MATCHMAKING_LOBBY_ROOM); // subscribe to later count updates
         const count = await getQueueCount(queueClient);
         socket.emit("matchmaking_count", { count });
       } catch (err) {
@@ -239,10 +232,16 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
 
     // ── Disconnect ─────────────────────────────────────────────────────────
     socket.on("disconnect", async (reason) => {
-      logger.info(`Socket ${socket.id} disconnected:`, reason);
-      if (playerId) {
-        await dequeueByPlayerId(queueClient, playerId);
-        await broadcastMatchmakingCount(io);
+      logger.debug(`Socket ${socket.id} disconnected:`, reason);
+      if (!playerId) return;
+      try {
+        // Only remove the queue entry if it belongs to *this* socket: the same player may have
+        // re-joined from a new tab/connection, and that entry must survive the old socket closing.
+        // Only broadcast when something actually changed (most disconnects aren't in the queue).
+        const removed = await dequeueIfSocket(queueClient, playerId, socket.id);
+        if (removed) broadcastMatchmakingCount(io);
+      } catch (err) {
+        logger.error("disconnect cleanup error:", err);
       }
     });
   });

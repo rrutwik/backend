@@ -6,6 +6,7 @@ import { logger } from '@/utils/logger';
 import { GameState } from '@/interfaces/chessgame.interface';
 import { Guest } from '@/interfaces/guest.interface';
 import { Socket } from 'socket.io';
+import { toClientGame } from '@/utils/chessGame';
 
 export class ChessController {
   private chessService = Container.get(ChessService);
@@ -62,7 +63,7 @@ export class ChessController {
 
       return res.status(201).json({
         message: 'Chess game created successfully',
-        data: game
+        data: toClientGame(game)
       });
     } catch (error) {
       logger.error(`Error creating chess game:, ${error}`);
@@ -84,7 +85,7 @@ export class ChessController {
         return res.status(400).json({ message: 'Game ID is required' });
       }
 
-      const game = await this.chessService.registerOpponent(gameId, user, guest);
+      const game = toClientGame(await this.chessService.registerOpponent(gameId, user, guest));
       const io = req.app.get("io") as Socket;
       io.to(`game:${gameId}`).emit("game_updated", {
         gameId,
@@ -124,10 +125,9 @@ export class ChessController {
         return res.status(403).json({ message: 'You are not a player in this game' });
       }
 
-      console.log('Game retrieved successfully');
       return res.status(200).json({
         message: 'Game retrieved successfully',
-        data: game
+        data: toClientGame(game)
       });
     } catch (error) {
       logger.error(`Error getting chess game:, ${error}`);
@@ -147,7 +147,7 @@ export class ChessController {
 
       return res.status(200).json({
         message: 'Active games retrieved successfully',
-        data: games
+        data: games.map(toClientGame)
       });
     } catch (error) {
       logger.error(`Error getting active games:, ${error}`);
@@ -175,7 +175,7 @@ export class ChessController {
         return res.status(400).json({ message: 'Game state is required' });
       }
 
-      const updatedGame = await this.chessService.updateGameState(gameId, version, gameState, user, guest);
+      const updatedGame = toClientGame(await this.chessService.updateGameState(gameId, version, gameState, user, guest));
       const io = req.app.get("io") as Socket;
       io.to(`game:${gameId}`).emit("game_updated", {
         gameId,
@@ -210,7 +210,9 @@ export class ChessController {
         return res.status(400).json({ message: 'Valid winner is required (white, black, or draw)' });
       }
 
-      const updatedGame = await this.chessService.endGame(gameId, winner, user._id.toString());
+      const updatedGame = toClientGame(await this.chessService.endGame(gameId, winner, user._id.toString()));
+      const io = req.app.get("io") as Socket;
+      io.to(`game:${gameId}`).emit("game_updated", { gameId, data: updatedGame });
 
       return res.status(200).json({
         message: 'Game ended successfully',
@@ -235,7 +237,9 @@ export class ChessController {
         return res.status(400).json({ message: 'Game ID is required' });
       }
 
-      const updatedGame = await this.chessService.abandonGame(gameId, user._id.toString());
+      const updatedGame = toClientGame(await this.chessService.abandonGame(gameId, user._id.toString()));
+      const io = req.app.get("io") as Socket;
+      io.to(`game:${gameId}`).emit("game_updated", { gameId, data: updatedGame });
 
       return res.status(200).json({
         message: 'Game abandoned successfully',
@@ -260,7 +264,7 @@ export class ChessController {
 
       return res.status(200).json({
         message: 'Game history retrieved successfully',
-        data: games
+        data: games.map(toClientGame)
       });
     } catch (error) {
       logger.error(`Error getting game history:, ${error}`);

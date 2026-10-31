@@ -8,12 +8,12 @@ import { TextEncoder } from 'util';
 import { Guest } from '@/interfaces/guest.interface';
 import { GuestModel } from '@/models/guest.model';
 import { v4 as uuidv4 } from 'uuid';
-import { UserModel } from '@/models/user.model';
 import { User } from '@/interfaces/users.interface';
 import { generateGuestName } from '@/utils/guestNames';
 import { UserProfileModel } from '@/models/user_profile.model';
 import { Chess } from 'chess.js';
 import { getValidMovesForMultipleCards } from '@/utils/chess';
+import { applyClientMove } from '@/utils/chessMove';
 
 type Suit = 'hearts' | 'diamonds' | 'clubs' | 'spades' | 'joker';
 type CardColor = 'red' | 'black';
@@ -193,12 +193,11 @@ export class ChessService {
 
   public async drawCards(gameId: string, user?: User, guest?: Guest): Promise<ChessGame> {
     try {
-      const gameModel = await ChessGameModel.findOne({ game_id: gameId });
-      if (!gameModel) {
+      // lean(): plain object, skips mongoose document hydration (deck + move history are large)
+      const game = await ChessGameModel.findOne({ game_id: gameId }).lean() as unknown as ChessGame;
+      if (!game) {
         throw new HttpException(404, 'Chess game not found');
       }
-
-      const game = gameModel.toJSON();
 
       if (game.game_state.status !== 'active') {
         throw new HttpException(400, 'Game is not active');
@@ -214,6 +213,15 @@ export class ChessService {
       const playerColor = isPlayerWhite ? 'white' : 'black';
       if (!game.is_vs_bot && game.game_state.turn !== playerColor) {
         throw new HttpException(400, `It's not your turn. Current turn: ${game.game_state.turn}`);
+      }
+
+      // Mirror of the client rule (canDrawCard): you may only draw when you hold no cards, or none of
+      // the cards you hold has a legal move. Without this a modified client could keep drawing until
+      // it gets a hand it likes. A stale/duplicate request is treated as a no-op, not an error.
+      const heldCards = (game.game_state.current_cards as unknown as PlayingCard[]) || [];
+      if (heldCards.length > 0 && getValidMovesForMultipleCards(new Chess(game.game_state.fen), heldCards).length > 0) {
+        logger.debug(`draw_card ignored for game ${gameId}: player still holds playable cards`);
+        return game;
       }
 
       const deck: DeckCard[] = [...(game.game_state.cards_deck as DeckCard[] || [])];
@@ -239,6 +247,10 @@ export class ChessService {
           isCheckmateLoss = true;
         }
       }
+      // Optimistic concurrency: two overlapping draw_card events (double click / retry) must not
+      // both apply, otherwise the deck is spliced twice from the same snapshot and failed-attempt
+      // history is duplicated.
+      const versionFilter = typeof game.version === 'number' ? { version: game.version } : {};
       const drawnCards = deck.splice(deck.length - drawCount, drawCount);
       const validMoves = getValidMovesForMultipleCards(chess, drawnCards);
       const newMoveHistory: MoveHistory[] = game.game_state.moves || [];
@@ -253,24 +265,28 @@ export class ChessService {
       if (isCheckmateLoss && validMoves.length === 0) {
         const winnerColor = game.game_state.turn === 'white' ? 'black' : 'white';
         const checkmatedGame = await ChessGameModel.findOneAndUpdate(
-          { game_id: gameId },
+          { game_id: gameId, ...versionFilter },
           {
             $set: {
               'game_state.moves': newMoveHistory,
               'game_state.status': 'completed',
               'game_state.winner': winnerColor,
-              'game_state.check_attempts': newCheckAttempts
+              'game_state.check_attempts': newCheckAttempts,
+              completed_at: new Date(),
             },
             $inc: { version: 1 }
           },
           { new: true }
-        );
+        ).lean();
+        if (!checkmatedGame) {
+          return this.currentGameAfterDrawConflict(gameId);
+        }
         logger.info(`Game over by check attempt limit for game ${gameId}`);
-        return checkmatedGame!.toJSON();
+        return checkmatedGame as unknown as ChessGame;
       }
 
       const updatedGame = await ChessGameModel.findOneAndUpdate(
-        { game_id: gameId },
+        { game_id: gameId, ...versionFilter },
         {
           $set: {
             'game_state.moves': newMoveHistory,
@@ -281,34 +297,63 @@ export class ChessService {
           $inc: { version: 1 },
         },
         { new: true }
-      );
+      ).lean();
 
       if (!updatedGame) {
-        throw new HttpException(409, 'Failed to draw cards — please try again');
+        return this.currentGameAfterDrawConflict(gameId);
       }
 
-      logger.info(`Drew ${drawCount} cards for game ${gameId} by player ${playerId}`);
-      return updatedGame.toJSON();
+      logger.debug(`Drew ${drawCount} cards for game ${gameId} by player ${playerId}`);
+      return updatedGame as unknown as ChessGame;
     } catch (error) {
       logger.error(`Error drawing cards:, ${error}`);
       throw error;
     }
   }
 
-  private async checkIfCanRegister(game: ChessGame, user?: User, guest?: Guest): Promise<boolean> {
-    const isGameOfUser = (await UserModel.findOne({
-      $or: [
-        { _id: game.player_white },
-        { _id: game.player_black }
-      ]
-    })) ? true : false;
-    return (user && isGameOfUser) || (guest && true);
+  /**
+   * A concurrent draw already changed the game after we read it. Instead of failing the
+   * request (which would surface an error toast for a harmless double-fire), return the
+   * current state so the caller just re-broadcasts what the winning draw produced.
+   */
+  private async currentGameAfterDrawConflict(gameId: string): Promise<ChessGame> {
+    logger.debug(`Concurrent draw detected for game ${gameId}, returning current state`);
+    const current = await ChessGameModel.findOne({ game_id: gameId }).lean() as unknown as ChessGame;
+    if (!current) {
+      throw new HttpException(404, 'Chess game not found');
+    }
+    return current;
+  }
+
+  /**
+   * Lightweight lookup for socket join checks: only the player ids and status,
+   * not the card deck / move history.
+   */
+  public async getGameParticipants(gameId: string): Promise<{
+    player_white?: string;
+    player_black?: string;
+    status: GameState['status'];
+  }> {
+    const game = await ChessGameModel.findOne({ game_id: gameId })
+      .select('player_white player_black game_state.status')
+      .lean();
+    if (!game) {
+      throw new HttpException(404, 'Chess game not found');
+    }
+    return {
+      player_white: game.player_white?.toString(),
+      player_black: game.player_black?.toString(),
+      status: game.game_state.status,
+    };
   }
 
   public async registerOpponent(gameId: string, user?: User, guest?: Guest): Promise<ChessGame> {
     try {
-      const game = await ChessGameModel.findOne({ game_id: gameId });
-      if (!game || (!user && !guest) || !await this.checkIfCanRegister(game, user, guest)) {
+      if (!user && !guest) {
+        throw new HttpException(401, 'User not authenticated');
+      }
+      const game = await ChessGameModel.findOne({ game_id: gameId }).lean() as unknown as ChessGame;
+      if (!game) {
         throw new HttpException(404, 'Chess game not found');
       }
 
@@ -330,24 +375,32 @@ export class ChessService {
       const isGuest = !user && !!guest;
       const opponentName = await this.resolveDisplayName(opponentId, isGuest);
 
-      if (opponentColor === 'white') {
-        game.player_white = opponentId;
-        game.player_white_is_guest = isGuest;
-        game.player_white_name = opponentName;
-      } else {
-        game.player_black = opponentId;
-        game.player_black_is_guest = isGuest;
-        game.player_black_name = opponentName;
+      // Atomic claim of the free seat: if two people open the invite link at the same moment only
+      // one of them matches (the previous read-modify-save let the second silently overwrite the first).
+      const updatedGame = await ChessGameModel.findOneAndUpdate(
+        {
+          game_id: gameId,
+          'game_state.status': 'waiting_for_opponent',
+          [`player_${opponentColor}`]: null,
+        },
+        {
+          $set: {
+            [`player_${opponentColor}`]: opponentId,
+            [`player_${opponentColor}_is_guest`]: isGuest,
+            [`player_${opponentColor}_name`]: opponentName,
+            'game_state.status': 'active',
+          },
+          $inc: { version: 1 },
+        },
+        { new: true }
+      ).lean();
+
+      if (!updatedGame) {
+        throw new HttpException(409, 'This game already has an opponent');
       }
 
-      // Update game state to active
-      game.game_state.status = 'active';
-      game.markModified('game_state');
-
-      const updatedGame = await game.save();
       logger.info(`Opponent ${opponentId} registered for game ${gameId} as ${opponentColor}`);
-
-      return updatedGame.toJSON();
+      return updatedGame as unknown as ChessGame;
     } catch (error) {
       logger.error(`Error registering opponent:, ${error}`);
       throw error;
@@ -387,11 +440,10 @@ export class ChessService {
 
   public async updateGameState(gameId: string, version: number, gameState: GameState, user: User, guest: Guest): Promise<ChessGame> {
     try {
-      const gameModel = await ChessGameModel.findOne({ game_id: gameId, version });
-      if (!gameModel) {
+      const game = await ChessGameModel.findOne({ game_id: gameId, version }).lean() as unknown as ChessGame;
+      if (!game) {
         throw new HttpException(404, 'Chess game not found or version mismatch');
       }
-      const game = gameModel.toJSON();
       if (game.game_state.status !== 'active') {
         throw new HttpException(400, 'Game is not active');
       }
@@ -400,51 +452,61 @@ export class ChessService {
       const currentPlayerId = user?._id.toString() || guest?._id.toString();
       const isPlayerWhite = game.player_white?.toString() === currentPlayerId;
       const isPlayerBlack = game.player_black?.toString() === currentPlayerId;
-      const isAnyPlayer = game.player_white?.toString() === currentPlayerId || game.player_black?.toString() === currentPlayerId;
-      if (!game.is_vs_bot && !isPlayerWhite && !isPlayerBlack) {
+      if (!isPlayerWhite && !isPlayerBlack) {
         throw new HttpException(403, 'You are not a player in this game');
       }
-      if (game.is_vs_bot && !isAnyPlayer) {
-        throw new HttpException(403, 'You are not a player in this game');
-      }
-      // Verify it's the player's turn
+      // Verify it's the player's turn (vs-bot games: the client also plays the bot's turn)
       const expectedTurn = game.game_state.turn;
       const playerColor = isPlayerWhite ? 'white' : 'black';
       if (expectedTurn !== playerColor && !game.is_vs_bot) {
         throw new HttpException(400, `It's not your turn. Current turn: ${expectedTurn}`);
       }
 
-      // Strip cards_deck from incoming state — deck is managed solely by draw_card events
-      const { cards_deck: _ignored, ...sanitizedState } = gameState as GameState & { cards_deck?: unknown };
+      // Everything below is derived server-side; the client's fen/turn/winner/status/moves are
+      // only used to identify the move, never trusted as the new state.
+      const next = applyClientMove(game, gameState);
+      const finished = next.status !== 'active';
 
-      // Perform atomic update with version increment
-      const finalGameState = { ...game.game_state, ...sanitizedState, check_attempts: 0 };
+      const $set: Record<string, unknown> = {
+        'game_state.fen': next.fen,
+        'game_state.turn': next.turn,
+        'game_state.status': next.status,
+        'game_state.moves': next.moves,
+        'game_state.current_cards': [],
+        'game_state.check_attempts': 0,
+      };
+      if (finished) {
+        $set['game_state.winner'] = next.winner;
+        $set['completed_at'] = new Date();
+      }
 
       const updatedGame = await ChessGameModel.findOneAndUpdate(
         { game_id: gameId, version }, // must match old version
-        {
-          $set: { game_state: finalGameState },
-          $inc: { version: 1 }, // increment version
-        },
+        { $set, $inc: { version: 1 } },
         { new: true }
-      );
+      ).lean();
 
       if (!updatedGame) {
         // If null, another update beat us — version conflict
         throw new HttpException(409, 'Version conflict — please refresh game state');
       }
 
-      logger.info(`Game ${gameId} state updated by ${currentPlayerId}`);
-      return updatedGame.toJSON();
+      logger.debug(`Game ${gameId} state updated by ${currentPlayerId}`);
+      return updatedGame as unknown as ChessGame;
     } catch (error) {
       logger.error(`Error updating chess game state:, ${error}`);
       throw error;
     }
   }
 
-  public async endGame(gameId: string, winner: 'white' | 'black' | 'draw', currentPlayerId: string): Promise<ChessGame> {
+  /**
+   * Finishes a game whose position is actually over (checkmate / stalemate / draw).
+   * The client no longer chooses the winner: it is derived from the stored position, so a player
+   * can't declare themselves the winner of a game in progress.
+   */
+  public async endGame(gameId: string, _claimedWinner: 'white' | 'black' | 'draw', currentPlayerId: string): Promise<ChessGame> {
     try {
-      const game = await ChessGameModel.findOne({ game_id: gameId });
+      const game = await ChessGameModel.findOne({ game_id: gameId }).lean() as unknown as ChessGame;
       if (!game) {
         throw new HttpException(404, 'Chess game not found');
       }
@@ -452,30 +514,51 @@ export class ChessService {
       // Verify the current player is part of this game
       const isPlayerWhite = game.player_white?.toString() === currentPlayerId;
       const isPlayerBlack = game.player_black?.toString() === currentPlayerId;
-
       if (!isPlayerWhite && !isPlayerBlack) {
         throw new HttpException(403, 'You are not a player in this game');
       }
+      if (game.game_state.status !== 'active') {
+        throw new HttpException(400, 'Game is not active');
+      }
 
-      // Update game state to completed
-      game.game_state.status = 'completed';
-      game.game_state.winner = winner;
-      game.completed_at = new Date();
-      game.markModified('game_state');
+      const chess = new Chess(game.game_state.fen);
+      let winner: 'white' | 'black' | 'draw';
+      if (chess.isCheckmate()) {
+        // side to move has been checkmated
+        winner = chess.turn() === 'w' ? 'black' : 'white';
+      } else if (chess.isStalemate() || chess.isDraw()) {
+        winner = 'draw';
+      } else {
+        throw new HttpException(400, 'Game is not over');
+      }
 
-      const updatedGame = await game.save();
+      const updatedGame = await ChessGameModel.findOneAndUpdate(
+        { game_id: gameId, 'game_state.status': 'active' },
+        {
+          $set: { 'game_state.status': 'completed', 'game_state.winner': winner, completed_at: new Date() },
+          $inc: { version: 1 },
+        },
+        { new: true }
+      ).lean();
+      if (!updatedGame) {
+        throw new HttpException(409, 'Game has already finished');
+      }
       logger.info(`Game ${gameId} ended. Winner: ${winner}`);
 
-      return updatedGame.toJSON();
+      return updatedGame as unknown as ChessGame;
     } catch (error) {
       logger.error(`Error ending chess game:, ${error}`);
       throw error;
     }
   }
 
+  /**
+   * A player leaving: in an active game that is a forfeit (the opponent wins); a game still
+   * waiting for an opponent is simply cancelled.
+   */
   public async abandonGame(gameId: string, currentPlayerId: string): Promise<ChessGame> {
     try {
-      const game = await ChessGameModel.findOne({ game_id: gameId });
+      const game = await ChessGameModel.findOne({ game_id: gameId }).lean() as unknown as ChessGame;
       if (!game) {
         throw new HttpException(404, 'Chess game not found');
       }
@@ -483,20 +566,30 @@ export class ChessService {
       // Verify the current player is part of this game
       const isPlayerWhite = game.player_white?.toString() === currentPlayerId;
       const isPlayerBlack = game.player_black?.toString() === currentPlayerId;
-
       if (!isPlayerWhite && !isPlayerBlack) {
         throw new HttpException(403, 'You are not a player in this game');
       }
+      const status = game.game_state.status;
+      if (status !== 'active' && status !== 'waiting_for_opponent') {
+        throw new HttpException(400, 'Game is already finished');
+      }
 
-      // Update game state to abandoned
-      game.game_state.status = 'abandoned';
-      game.completed_at = new Date();
-      game.markModified('game_state');
+      const $set: Record<string, unknown> = { 'game_state.status': 'abandoned', completed_at: new Date() };
+      if (status === 'active' && !game.is_vs_bot) {
+        $set['game_state.winner'] = isPlayerWhite ? 'black' : 'white';
+      }
 
-      const updatedGame = await game.save();
+      const updatedGame = await ChessGameModel.findOneAndUpdate(
+        { game_id: gameId, 'game_state.status': status },
+        { $set, $inc: { version: 1 } },
+        { new: true }
+      ).lean();
+      if (!updatedGame) {
+        throw new HttpException(409, 'Game has already finished');
+      }
       logger.info(`Game ${gameId} abandoned by ${currentPlayerId}`);
 
-      return updatedGame.toJSON();
+      return updatedGame as unknown as ChessGame;
     } catch (error) {
       logger.error(`Error abandoning chess game:, ${error}`);
       throw error;
@@ -512,7 +605,7 @@ export class ChessService {
         ],
         'game_state.status': { $in: ['completed', 'abandoned'] }
       })
-        .sort({ completed_at: -1 })
+        .sort({ completed_at: -1, updatedAt: -1 })
         .limit(limit);
 
       return games.map(game => game.toJSON());

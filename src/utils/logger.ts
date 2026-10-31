@@ -31,8 +31,12 @@ const getCallerInfo = (): string => {
  * Log Level
  * error: 0, warn: 1, info: 2, http: 3, verbose: 4, debug: 5, silly: 6
  */
+// Override with LOG_LEVEL env. Production defaults to 'info' so per-event debug
+// logging doesn't hit disk on every socket message / cron tick.
+const LOG_LEVEL: string = process.env.LOG_LEVEL || (NODE_ENV === 'production' ? 'info' : 'debug');
+
 const logger: Logger = winston.createLogger({
-  level: 'debug',
+  level: LOG_LEVEL,
   format: winston.format.combine(
     winston.format.timestamp({
       format: 'YYYY-MM-DD HH:mm:ss',
@@ -80,20 +84,19 @@ if (NODE_ENV === 'production') {
   }));
 }
 
-// Create a custom logger that includes the caller info
+// Create a custom logger that includes the caller info.
+// The caller lookup builds a stack trace, so skip it entirely when the level is disabled.
+type LogFn = (message: string, ...meta: any[]) => void;
+const makeLogFn = (level: 'error' | 'warn' | 'info' | 'debug'): LogFn => (message, ...meta) => {
+  if (!logger.isLevelEnabled(level)) return;
+  logger[level](message, { caller: getCallerInfo(), ...meta });
+};
+
 const customLogger = {
-  error: (message: string, ...meta: any[]) => {
-    logger.error(message, { caller: getCallerInfo(), ...meta });
-  },
-  warn: (message: string, ...meta: any[]) => {
-    logger.warn(message, { caller: getCallerInfo(), ...meta });
-  },
-  info: (message: string, ...meta: any[]) => {
-    logger.info(message, { caller: getCallerInfo(), ...meta });
-  },
-  debug: (message: string, ...meta: any[]) => {
-    logger.debug(message, { caller: getCallerInfo(), ...meta });
-  },
+  error: makeLogFn('error'),
+  warn: makeLogFn('warn'),
+  info: makeLogFn('info'),
+  debug: makeLogFn('debug'),
 };
 
 const stream: StreamOptions = {

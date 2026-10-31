@@ -29,6 +29,8 @@ export interface GameState {
     value: string;
     color: string;
   }[];
+  /** Added by toClientGame(): number of cards left in the (hidden) draw pile. */
+  cards_remaining?: number;
 };
 
 export interface ChessGame {
