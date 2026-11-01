@@ -59,6 +59,10 @@ const ChessGameSchema: Schema = new Schema({
     required: true,
     default: false
   },
+  has_bot: {
+    type: Boolean,
+    default: false,
+  },
   player_white: {
     type: Schema.Types.ObjectId,
     required: false,
@@ -122,6 +126,8 @@ ChessGameSchema.index({ player_black: 1, 'game_state.status': 1 });
 ChessGameSchema.index({ createdAt: -1 });
 // Used by the auto-abandon sweep (status = 'active' AND updatedAt < threshold), which runs every 10s.
 ChessGameSchema.index({ 'game_state.status': 1, updatedAt: 1 });
+// Used by the bot worker (active games that have a bot seat), polled every second.
+ChessGameSchema.index({ 'game_state.status': 1 }, { partialFilterExpression: { has_bot: true }, name: 'has_bot_active' });
 export const ChessGameModel = model<ChessGame & Document>('chess_game', ChessGameSchema);
 ChessGameModel.syncIndexes({ background: true }).catch((err) => {
   logger.error(`Failed to sync chess_games indexes: ${err}`);

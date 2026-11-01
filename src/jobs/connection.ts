@@ -26,3 +26,4 @@ export const queueClient = new Redis(redisUrl, {
 
 export const MATCHMAKING_QUEUE_NAME = 'MatchmakingQueue';
 export const AUTO_ABANDON_QUEUE_NAME = 'AutoAbandonQueue';
+export const BOT_QUEUE_NAME = 'BotQueue';

@@ -153,6 +153,7 @@ export class ChessService {
     player2Id: string,
     player1Meta: { isGuest: boolean },
     player2Meta: { isGuest: boolean },
+    opts: { hasBot?: boolean } = {},
   ): Promise<ChessGame> {
     try {
       const deck = createShuffledDeck();
@@ -173,6 +174,7 @@ export class ChessService {
         player_white_name: whiteName,
         player_black_name: blackName,
         is_vs_bot: false,
+        has_bot: !!opts.hasBot,
         cards_to_draw: 3,
         game_state: {
           fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',

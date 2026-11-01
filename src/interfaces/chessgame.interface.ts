@@ -37,6 +37,8 @@ export interface ChessGame {
   _id?: string;
   game_id: string;
   is_vs_bot: boolean;
+  /** True when one seat is a server-run matchmaking bot (see jobs/bot.worker.ts). */
+  has_bot?: boolean;
   cards_to_draw: number;
   player_white: string | ObjectId;
   player_black: string | ObjectId;

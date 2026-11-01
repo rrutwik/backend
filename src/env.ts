@@ -30,4 +30,8 @@ export const env = cleanEnv(process.env, {
   OPENAI_KEY: str({ default: '' }),
   OPENAI_MODEL_NAME: str({ default: 'gpt-3.5-turbo' }),
   MAXIMUM_CHAT_BUFFER: num({ default: 10 }),
+
+  // Card-chess matchmaking bots (fill the lobby / opponents when few real players are online)
+  BOTS_ENABLED: bool({ default: false }),
+  BOT_COUNT: num({ default: 50 }),
 });

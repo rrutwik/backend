@@ -12,9 +12,10 @@ import { GameState } from "./interfaces/chessgame.interface";
 import { logger } from "./utils/logger";
 import { env } from "./env";
 import { toClientGame } from "./utils/chessGame";
-import { enqueuePlayer, dequeueByPlayerId, dequeueIfSocket, getQueueCount } from "./utils/matchmaking";
+import { enqueuePlayer, dequeueByPlayerId, dequeueIfSocket, botDelayMs } from "./utils/matchmaking";
 import { queueClient } from "./jobs/connection";
-import { broadcastMatchmakingCount, triggerMatchmaking, MATCHMAKING_LOBBY_ROOM } from "./services/matchmaking.service";
+import { broadcastMatchmakingCount, getDisplayedQueueCount, triggerMatchmaking, MATCHMAKING_LOBBY_ROOM } from "./services/matchmaking.service";
+import { botsEnabled } from "./services/bot.service";
 
 declare module "socket.io" {
   interface SocketData {
@@ -200,6 +201,12 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
         // Try to match right away. The periodic sweep in jobs/matchmaking.worker.ts remains
         // as a fallback (queue timeouts, or another process holding the matchmaking lock).
         void triggerMatchmaking(io, chessService);
+
+        // If nobody else shows up, run again once this player's grace period is over so a bot is
+        // assigned on time (the 2s sweep in jobs/ covers a process restart in between).
+        if (botsEnabled()) {
+          setTimeout(() => void triggerMatchmaking(io, chessService), botDelayMs(playerId) + 100).unref();
+        }
       } catch (err) {
         logger.error("join_matchmaking error:", err);
         socket.emit("error", { message: "Failed to join matchmaking" });
@@ -223,7 +230,7 @@ export const initSocket = async (server: HttpServer, chessService: ChessService)
     socket.on("get_matchmaking_count", async () => {
       try {
         socket.join(MATCHMAKING_LOBBY_ROOM); // subscribe to later count updates
-        const count = await getQueueCount(queueClient);
+        const count = await getDisplayedQueueCount();
         socket.emit("matchmaking_count", { count });
       } catch (err) {
         logger.error("get_matchmaking_count error:", err);

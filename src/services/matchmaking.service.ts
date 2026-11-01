@@ -4,12 +4,17 @@ import { ChessService } from '@/services/chess.service';
 import { queueClient } from '@/jobs/connection';
 import { logger } from '@/utils/logger';
 import {
+  botDelayMs,
+  botLobbyCount,
   enqueuePlayer,
   getQueueCount,
+  peekQueue,
   popExpiredPlayers,
+  popPlayerIfWaited,
   popTwoPlayers,
   MATCHMAKING_TIMEOUT_MS,
 } from '@/utils/matchmaking';
+import { botsEnabled, pickFreeBot } from '@/services/bot.service';
 
 const LOCK_KEY = 'matchmaking:lock';
 const LOCK_TTL_MS = 10_000;
@@ -31,6 +36,12 @@ export const MATCHMAKING_LOBBY_ROOM = 'matchmaking_lobby';
 let countTimer: NodeJS.Timeout | null = null;
 let lastCountBroadcastAt = 0;
 
+/** Queue size shown to players: the real queue, plus the simulated bot lobby when bots are on. */
+export const getDisplayedQueueCount = async (): Promise<number> => {
+  const real = await getQueueCount(queueClient);
+  return botsEnabled() ? real + botLobbyCount() : real;
+};
+
 export const broadcastMatchmakingCount = (io: Server): void => {
   if (countTimer) return; // a broadcast is already scheduled; it will read the latest count
   const wait = Math.max(0, COUNT_BROADCAST_MIN_INTERVAL_MS - (Date.now() - lastCountBroadcastAt));
@@ -38,7 +49,7 @@ export const broadcastMatchmakingCount = (io: Server): void => {
     countTimer = null;
     lastCountBroadcastAt = Date.now();
     try {
-      const count = await getQueueCount(queueClient);
+      const count = await getDisplayedQueueCount();
       io.to(MATCHMAKING_LOBBY_ROOM).emit('matchmaking_count', { count });
     } catch (err) {
       logger.error('broadcastMatchmakingCount error:', err);
@@ -55,6 +66,43 @@ const LUA_RELEASE_LOCK = `
   end
   return 0
 `;
+
+/** Pairs queued players who have waited past their bot delay with a free bot. Call under the lock. */
+const matchWaitersWithBots = async (io: Server, chessService: ChessService): Promise<void> => {
+  const waiters = await peekQueue(queueClient, 20);
+  for (const waiter of waiters) {
+    const minWait = botDelayMs(waiter.playerId);
+    if (Date.now() - waiter.joinedAt < minWait) continue;
+
+    const botId = await pickFreeBot();
+    if (!botId) {
+      logger.warn('No free bot available for matchmaking');
+      return;
+    }
+
+    // Atomic: a no-op if the player left or was matched since we peeked.
+    const entry = await popPlayerIfWaited(queueClient, waiter.playerId, Date.now(), minWait);
+    if (!entry) continue;
+
+    try {
+      const game = await chessService.createMatchmadeGame(
+        entry.playerId,
+        botId,
+        { isGuest: entry.isGuest },
+        { isGuest: true },
+        { hasBot: true },
+      );
+      const color = game.player_white?.toString() === entry.playerId ? 'white' : 'black';
+      io.to(entry.socketId).emit('matchmaking_found', { gameId: game.game_id, color });
+      broadcastMatchmakingCount(io);
+      logger.info(`Bot match! Game ${game.game_id}: ${entry.playerId}(${color}) vs bot ${botId}`);
+    } catch (err) {
+      logger.error('Bot game creation failed, re-queueing player:', err);
+      await enqueuePlayer(queueClient, entry);
+      return;
+    }
+  }
+};
 
 /**
  * Expires stale entries and pairs up waiting players.
@@ -105,6 +153,12 @@ export const runMatchmaking = async (io: Server, chessService: ChessService): Pr
         await enqueuePlayer(queueClient, entry2);
         break;
       }
+    }
+
+    // Real players always get first pick (above). Whoever is still alone after their grace
+    // period gets a bot, so nobody waits long on a quiet server.
+    if (botsEnabled()) {
+      await matchWaitersWithBots(io, chessService).catch((err) => logger.error('Bot matchmaking error:', err));
     }
   } finally {
     await queueClient.eval(LUA_RELEASE_LOCK, 1, LOCK_KEY, token).catch((err) => {

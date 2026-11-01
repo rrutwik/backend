@@ -11,6 +11,16 @@ const GuestSchema: Schema = new Schema({
         type: String,
         required: true,
     },
+    is_bot: {
+        type: Boolean,
+        default: false,
+        index: true,
+    },
+    bot_skill: {
+        type: Number,
+        min: 0,
+        max: 1,
+    },
     metadata: {
         type: Object,
         default: {},

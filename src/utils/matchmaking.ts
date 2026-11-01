@@ -125,3 +125,65 @@ export async function popExpiredPlayers(redis: Redis, nowMs: number, timeoutMs: 
 export async function getQueueCount(redis: Redis): Promise<number> {
   return redis.zcard(ZSET_KEY);
 }
+
+/** The `limit` longest-waiting entries, oldest first (read-only; use popPlayerIfWaited to take one). */
+export async function peekQueue(redis: Redis, limit: number): Promise<QueueEntry[]> {
+  const ids = await redis.zrange(ZSET_KEY, 0, limit - 1);
+  if (ids.length === 0) return [];
+  const jsons = await redis.hmget(HASH_KEY, ...ids);
+  return jsons.filter((j): j is string => !!j).map((j) => JSON.parse(j) as QueueEntry);
+}
+
+const LUA_POP_IF_WAITED = `
+  local json = redis.call('HGET', KEYS[2], ARGV[1])
+  if not json then
+    redis.call('ZREM', KEYS[1], ARGV[1])
+    return nil
+  end
+  local entry = cjson.decode(json)
+  if tonumber(ARGV[2]) - tonumber(entry.joinedAt) < tonumber(ARGV[3]) then return nil end
+  redis.call('ZREM', KEYS[1], ARGV[1])
+  redis.call('HDEL', KEYS[2], ARGV[1])
+  return json
+`;
+
+/**
+ * Atomically removes one specific player, but only if they have been waiting at least `minWaitMs`
+ * and are still queued. Returns the entry, or null (not queued / not waited long enough).
+ */
+export async function popPlayerIfWaited(redis: Redis, playerId: string, nowMs: number, minWaitMs: number): Promise<QueueEntry | null> {
+  const result = (await redis.eval(LUA_POP_IF_WAITED, 2, ZSET_KEY, HASH_KEY, playerId, nowMs, minWaitMs)) as string | null;
+  return result ? (JSON.parse(result) as QueueEntry) : null;
+}
+
+// ─── Bot helpers ──────────────────────────────────────────────────────────────
+
+function hashString(input: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * How long a lone waiter is given to meet a real player before a bot is assigned: 3-8s, derived
+ * from the player id so it is the same in every process and after a restart, and the match still
+ * lands inside ~10s.
+ */
+export function botDelayMs(playerId: string): number {
+  return 3000 + (hashString(playerId) % 5000);
+}
+
+/**
+ * Number of "searching" players to add to the real queue count so the lobby never looks empty.
+ * A pure function of time (a few sine waves), so every PM2 instance reports the same number and it
+ * drifts smoothly instead of jumping. Always within [5, 100].
+ */
+export function botLobbyCount(nowMs: number = Date.now()): number {
+  const t = nowMs / 1000;
+  const wave = 0.5 * Math.sin(t / 97) + 0.3 * Math.sin(t / 41 + 1.3) + 0.2 * Math.sin(t / 13 + 2.1); // [-1, 1]
+  const v = (wave + 1) / 2; // [0, 1]
+  return Math.min(100, Math.max(5, 5 + Math.round(v * 95)));
+}
