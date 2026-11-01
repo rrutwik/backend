@@ -53,6 +53,10 @@ export interface ChessGame {
   updated_at?: Date;
   completed_at?: Date;
   version?: number;
+  /** Added by toClientGame() for active games: when the idle timeout will end the game (ISO). */
+  turn_deadline_at?: string;
+  /** Added by toClientGame(): server clock when the payload was built (ISO), to correct client clock skew. */
+  server_now?: string;
 }
 
 export type PieceType = 'pawn' | 'rook' | 'knight' | 'bishop' | 'queen' | 'king';

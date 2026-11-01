@@ -3,10 +3,10 @@ import { Server } from 'socket.io';
 import { ChessGameModel } from '@/models/chess_games.model';
 import { logger } from '@/utils/logger';
 import { bullmqRedisConnection, AUTO_ABANDON_QUEUE_NAME } from './connection';
-import { toClientGame } from '@/utils/chessGame';
+import { toClientGame, TURN_TIMEOUT_MS } from '@/utils/chessGame';
 import { ChessGame } from '@/interfaces/chessgame.interface';
 
-const ABANDON_TIMEOUT_MS = 60 * 1000; // 60 seconds
+const ABANDON_TIMEOUT_MS = TURN_TIMEOUT_MS;
 const BATCH_SIZE = 100;
 
 export const initAutoAbandonWorker = (io: Server) => {
