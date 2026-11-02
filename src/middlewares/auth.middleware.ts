@@ -80,9 +80,10 @@ export const GuestMiddleware = async (req: RequestWithGuest, res: Response, next
     }
     return next();
   } catch (error) {
-    logger.info(`Error in guest middleware: ${error}`);
-    logger.error(error);
-    return next();
+    // A failed lookup is a server problem, not "no credentials". Falling through here made
+    // AuthMiddleware answer 401 "Wrong authentication token" for a valid guest during a DB error.
+    logger.error(`Error in guest middleware: ${error}`);
+    return next(new HttpException(HttpStatusCode.ServiceUnavailable, 'Service temporarily unavailable'));
   }
 }
 
