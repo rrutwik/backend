@@ -7,7 +7,8 @@ import { User } from "@/interfaces/users.interface";
 import { ChatSessionModel, MessageRole } from "@/models/chat_session.model";
 import { UserProfileModel } from "@/models/user_profile.model";
 import { logger } from "@/utils/logger";
-import { Service } from "typedi";
+import { UserService } from "@/services/users.service";
+import Container, { Service } from "typedi";
 
 @Service()
 export class ChatSessionService {
@@ -48,7 +49,14 @@ export class ChatSessionService {
             const userUpdatedChatSession = (chatSession: ChatSession) => {
               resolve(chatSession);
             }
-            this.agent.sendMessageToAgent(userMessage.text, language, dbSession, (dbSession.chatbot_id as ChatBot)?.prompt, userUpdatedChatSession);
+            // The credit is charged before the model runs, so give it back if the model fails.
+            // reject() is a no-op once the request has already been answered.
+            const onFailure = async (error: Error) => {
+              await UserProfileModel.updateOne({ user_id: userId }, { $inc: { credits: 1 } });
+              await Container.get(UserService).clearUserProfileCache(userId);
+              reject(error);
+            };
+            this.agent.sendMessageToAgent(userMessage.text, language, dbSession, (dbSession.chatbot_id as ChatBot)?.prompt, userUpdatedChatSession, onFailure);
           });
         } catch (error) {
             const errorMessage = `Error while adding message to session: ${session._id}`;

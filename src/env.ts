@@ -29,6 +29,8 @@ export const env = cleanEnv(process.env, {
   GOOGLE_CLIENT_ID: str({ default: '' }),
   OPENAI_KEY: str({ default: '' }),
   OPENAI_MODEL_NAME: str({ default: 'gpt-3.5-turbo' }),
+  GEMINI_API_KEY: str({ default: '' }),
+  GEMINI_MODEL_NAME: str({ default: 'gemini-3.5-flash' }),
   MAXIMUM_CHAT_BUFFER: num({ default: 10 }),
 
   // Card-chess matchmaking bots (fill the lobby / opponents when few real players are online)
