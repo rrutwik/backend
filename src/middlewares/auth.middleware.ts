@@ -53,7 +53,7 @@ export const AuthMiddleware = async (req: RequestWithUser, res: Response, next: 
       logger.error('Session token not found');
       return next(new HttpException(401, 'Wrong authentication token'));
     }
-  } catch (error) {
+  } catch (error: any) {
     logger.info(`Error in auth middleware: ${error}`);
     logger.error(error);
     if (error instanceof TokenExpiredError) {

@@ -2,9 +2,9 @@ import { ChatSession } from "@/interfaces/chatsession.interface";
 import { logger } from "@/utils/logger";
 import { HumanMessage, AIMessage, BaseMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatSessionModel, MessageRole } from "@/models/chat_session.model";
-import { ChatOpenAI } from "@langchain/openai";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatPromptTemplate, HumanMessagePromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate } from "@langchain/core/prompts";
-import { OPENAI_KEY, OPENAI_MODEL_NAME, MAXIMUM_CHAT_BUFFER } from "@/config";
+import { GEMINI_API_KEY, GEMINI_MODEL_NAME } from "@/config";
 import Redis from "ioredis";
 import { sha256, } from "@langchain/core/utils/hash";
 import { ChatBot } from "@/interfaces/chatbot.interface";
@@ -14,7 +14,12 @@ import { env } from "@/env";
 import RedisCache from "@/utils/rediscache";
 
 
-const modelName = OPENAI_MODEL_NAME ?? "gpt-3.5-turbo-1106";
+const modelName = GEMINI_MODEL_NAME;
+if (!GEMINI_API_KEY) {
+  // Failed replies refund the user's credit, so a missing key would otherwise go unnoticed.
+  logger.error("GEMINI_API_KEY is not set: every chat reply will fail (users get a refund and an apology message).");
+}
+const FALLBACK_REPLY = "Sorry, I couldn't reply just now. Please try again in a moment. Your credit has been returned.";
 const languageMapping = {
   en: "English",
   hi: "Hindi",
@@ -46,32 +51,15 @@ function getCacheClient() {
 
 
 export class Agent {
-  private chatGPTModel = new ChatOpenAI({
-    apiKey: OPENAI_KEY,
+  private chatGPTModel = new ChatGoogleGenerativeAI({
+    apiKey: GEMINI_API_KEY,
     temperature: 0,
     model: modelName,
     streaming: true,
     cache: getCacheClient(),
     callbacks: [{
-      handleLLMEnd(output, runId, parentRunId, tags, metadata) {
+      handleLLMEnd(output, runId, parentRunId, tags) {
         logger.debug(`${modelName} response: ${JSON.stringify(output)} for runId: ${runId} with tags: ${tags} and parentRunId: ${parentRunId}`);
-        if (
-          metadata &&
-          typeof metadata === "object" &&
-          "response" in metadata &&
-          metadata.response &&
-          typeof (metadata.response as any).headers?.get === "function"
-        ) {
-          const headers = (metadata.response as any).headers;
-          const remainingRequests = headers.get("x-ratelimit-remaining-requests");
-          const remainingTokens = headers.get("x-ratelimit-remaining-tokens");
-          const resetRequests = headers.get("x-ratelimit-reset-requests");
-          const resetTokens = headers.get("x-ratelimit-reset-tokens");
-
-          logger.debug(
-            `Rate Limit Info -> Remaining Requests: ${remainingRequests}, Remaining Tokens: ${remainingTokens}, Reset Requests: ${resetRequests}, Reset Tokens: ${resetTokens}`
-          );
-        }
       },
       handleLLMError(error, runId, parentRunId, tags) {
         logger.error(`${modelName} error: ${error} for runId: ${runId} with tags: ${tags} and parentRunId: ${parentRunId}`);
@@ -87,6 +75,9 @@ export class Agent {
     const history: BaseMessage[] = [];
     const lastFiveMessages = messages.slice(-5);
     lastFiveMessages.forEach((message) => {
+      // Gemini rejects empty message parts. Empty assistant bubbles are left behind by replies that failed
+      // earlier, and the apology text is not something the model said, so neither goes back into the history.
+      if (!message.text || message.text === FALLBACK_REPLY) return;
       if (message.role === MessageRole.USER) {
         history.push(new HumanMessage(message.text));
       } else if (message.role === MessageRole.ASSISTANT) {
@@ -108,8 +99,15 @@ export class Agent {
       SystemMessagePromptTemplate.fromTemplate(`You are given a message from a user and a bot name and description and religion of the bot. Suggest a name for this chat session based on the message. Only suggest a name, do not add any additional text.`),
       HumanMessagePromptTemplate.fromTemplate("Message: {message}\nBot Name: {botName}\nBot Religion: {religion}\nBot Description: {botDescription}")
     ]);
-    const output = await this.chatGPTModel.invoke(await prompt.format({ message, botName, religion, botDescription }));
-    return output.content as string;
+    try {
+      const output = await this.chatGPTModel.invoke(await prompt.format({ message, botName, religion, botDescription }));
+      const name = output.text.trim();
+      if (name) return name;
+    } catch (error) {
+      // A model outage must not stop the user from starting a chat; fall back to the message itself.
+      logger.error(`Could not suggest chat session name, using the message instead: ${error}`);
+    }
+    return message.trim().slice(0, 40) || "Chat Session";
   }
 
   public async sendMessageToAgent(
@@ -117,7 +115,8 @@ export class Agent {
     userLanguage: string,
     _chatSession: ChatSession,
     promptString: string,
-    userUpdatedChatSession: (chatSession: ChatSession) => void
+    userUpdatedChatSession: (chatSession: ChatSession) => void,
+    onFailure?: (error: Error) => void | Promise<void>
   ): Promise<void> {
     try {
       const chatSession = await this.addUserMessage(_chatSession, message);
@@ -130,6 +129,32 @@ export class Agent {
       logger.error(
         `Error while adding message to session: ${_chatSession._id} ${error} ${error.stack}`
       );
+      await this.recoverSession(_chatSession);
+      try {
+        await onFailure?.(error);
+      } catch (callbackError) {
+        logger.error(`onFailure handler failed for session ${_chatSession._id}: ${callbackError}`);
+      }
+    }
+  }
+
+  // If the model call fails, unlock the chat and replace the empty assistant bubble
+  // with a visible message, otherwise the user is stuck (can_message stays false forever).
+  private async recoverSession(chatSession: ChatSession): Promise<void> {
+    try {
+      await ChatSessionModel.findOneAndUpdate(
+        { _id: chatSession._id },
+        {
+          $set: {
+            can_message: true,
+            "messages.$[empty].text": FALLBACK_REPLY,
+            "messages.$[empty].updatedAt": new Date()
+          }
+        },
+        { arrayFilters: [{ "empty.role": MessageRole.ASSISTANT, "empty.text": "" }] }
+      );
+    } catch (recoverError) {
+      logger.error(`Could not recover chat session ${chatSession._id}: ${recoverError}`);
     }
   }
 
@@ -152,13 +177,21 @@ export class Agent {
     promptString: string,
     userLanguage: string
   ): Promise<BaseMessage[]> {
-    const pastMessages = this.getMessages(chatSession);
+    const allPast = this.getMessages(chatSession);
+    // Gemini accepts exactly one system message and it must come first, so everything that is
+    // a system message (the bot prompt, the language instruction, any stored system notes) is merged into one.
+    const escapeBraces = (text: string) => text.replace(/[{}]/g, (c) => c + c);
+    const systemNotes = allPast.filter((m) => m instanceof SystemMessage).map((m) => escapeBraces(m.text));
+    const pastMessages = allPast.filter((m) => !(m instanceof SystemMessage));
+
+    const systemText = [
+      promptString,
+      `You are given chat history for reference with new user message. Reply in ${languageMapping[userLanguage]} language while keeping your tone gentle and compassionate.`,
+      ...systemNotes
+    ].join("\n\n");
 
     const prompt = ChatPromptTemplate.fromMessages([
-      SystemMessagePromptTemplate.fromTemplate(promptString),
-      SystemMessagePromptTemplate.fromTemplate(
-        `You are given chat history for reference with new user message. Reply in ${languageMapping[userLanguage]} language while keeping your tone gentle and compassionate.`
-      ),
+      SystemMessagePromptTemplate.fromTemplate(systemText),
       new MessagesPlaceholder("history"),
       HumanMessagePromptTemplate.fromTemplate("{inputMessage}")
     ]);
@@ -175,15 +208,7 @@ export class Agent {
   }> {
     logger.debug(`Prompt: ${prompt}`);
 
-    const streamOutput = this.chatGPTModel.streamEvents(prompt, {
-      response_format: {
-        type: 'text'
-      },
-      stream_options: {
-        include_usage: true,
-      },
-      version: 'v2'
-    });
+    const streamOutput = this.chatGPTModel.streamEvents(prompt, { version: 'v2' });
 
     const updatedSession = await ChatSessionModel.findOneAndUpdate(
       { _id: chatSession._id },
@@ -215,7 +240,7 @@ export class Agent {
         } else {
           aiMessage = chunkAIMessage.data.chunk;
         }
-        currentContent = aiMessage.content as string;
+        currentContent = aiMessage.text;
         throttleUpdate(currentContent);
       }
     }
@@ -233,7 +258,7 @@ export class Agent {
       { _id: chatSession._id },
       {
         can_message: true,
-        $set: { "messages.$[message].text": agentMessage.content, "messages.$[message].usage_metadata": usage_metadata }
+        $set: { "messages.$[message].text": agentMessage.text,"messages.$[message].usage_metadata": usage_metadata }
       },
       { arrayFilters: [{ "message._id": messageId }] }
     );
