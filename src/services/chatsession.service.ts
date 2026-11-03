@@ -20,14 +20,14 @@ export class ChatSessionService {
     }
 
     public async getSessionByUUID(uuid: string, userId: string): Promise<ChatSession> {
-      return await (ChatSessionModel.findOne({ uuid: uuid, user_id: userId }).populate('chatbot_id').exec());
+      return await (ChatSessionModel.findOne({ uuid: uuid, user_id: userId, deleted_at: null }).populate('chatbot_id').exec());
     }
 
     public async addMessageToSession(session: ChatSession, message: string, userId: string): Promise<ChatSession> {
         try {
           const [dbSession, userProfile] = await Promise.all([
             ChatSessionModel.findOne(
-              { user_id: userId, uuid: session.uuid },
+              { user_id: userId, uuid: session.uuid, deleted_at: null },
             ).populate('chatbot_id'),
             UserProfileModel.findOne({ user_id: userId })
           ]);

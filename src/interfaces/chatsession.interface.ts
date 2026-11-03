@@ -12,6 +12,7 @@ export interface ChatSession {
   } | string | ObjectId,
   uuid?: string,
   can_message?: boolean,
+  deleted_at?: Date | null,
   messages?: Message[],
   created_at?: Date,
   updated_at?: Date

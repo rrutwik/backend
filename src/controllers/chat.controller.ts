@@ -94,6 +94,7 @@ export class ChatController {
       const [chatSessions, total] = await Promise.all([
         ChatSessionModel.find({
           user_id: user._id,
+          deleted_at: null,
         }, {
           name: 1,
           uuid: 1,
@@ -115,6 +116,7 @@ export class ChatController {
         .limit(limit),
         ChatSessionModel.countDocuments({
           user_id: user._id,
+          deleted_at: null,
         })
       ]);
       return res.status(200).json({
@@ -141,6 +143,7 @@ export class ChatController {
       const chatSession = await ChatSessionModel.findOne({
         uuid: chatSessionUUID,
         user_id: user._id,
+        deleted_at: null,
       }).populate({
         path: 'chatbot_id',
         select: 'name', // Specifies that only the 'name' field should be populated
@@ -164,7 +167,7 @@ export class ChatController {
         return res.status(400).json({ message: 'name is required' });
       }
       const chatSession = await ChatSessionModel.findOneAndUpdate(
-        { uuid: req.params.id, user_id: user._id },
+        { uuid: req.params.id, user_id: user._id, deleted_at: null },
         { $set: { name } },
         { new: true, projection: { name: 1, uuid: 1, updatedAt: 1 } }
       );
@@ -180,8 +183,12 @@ export class ChatController {
   public deleteChat = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const user: User = req.user;
-      const result = await ChatSessionModel.deleteOne({ uuid: req.params.id, user_id: user._id });
-      if (result.deletedCount === 0) {
+      // Soft delete: the chat disappears from the app but stays in the database (restorable by clearing deleted_at).
+      const result = await ChatSessionModel.updateOne(
+        { uuid: req.params.id, user_id: user._id, deleted_at: null },
+        { $set: { deleted_at: new Date() } }
+      );
+      if (result.matchedCount === 0) {
         return res.status(404).json({ message: 'session not found' });
       }
       return res.status(200).json({ message: 'deleted' });

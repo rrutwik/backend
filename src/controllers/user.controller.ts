@@ -63,6 +63,7 @@ export class UserController {
       }
       const chatSessionModel: ChatSession = await ChatSessionModel.findOne({
         user_id: user._id,
+        deleted_at: null,
       });
       const messages = chatSessionModel.messages;
       return res.status(200).json({

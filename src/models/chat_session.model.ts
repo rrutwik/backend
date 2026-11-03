@@ -72,6 +72,13 @@ const ChatSessionSchema: Schema = new Schema({
         required: true,
         default: false
     },
+    // Soft delete: set when the user deletes the chat. Every user-facing query filters on `deleted_at: null`
+    // (which also matches older documents that have no such field).
+    deleted_at: {
+        type: Date,
+        default: null,
+        index: true
+    },
     messages: {
         type: [MessageSchema],
         required: true,
