@@ -77,7 +77,7 @@ export class Agent {
     lastFiveMessages.forEach((message) => {
       // Gemini rejects empty message parts. Empty assistant bubbles are left behind by replies that failed
       // earlier, and the apology text is not something the model said, so neither goes back into the history.
-      if (!message.text || message.text === FALLBACK_REPLY) return;
+      if (!message.text || message.type === "error" || message.text === FALLBACK_REPLY) return;
       if (message.role === MessageRole.USER) {
         history.push(new HumanMessage(message.text));
       } else if (message.role === MessageRole.ASSISTANT) {
@@ -148,6 +148,8 @@ export class Agent {
           $set: {
             can_message: true,
             "messages.$[empty].text": FALLBACK_REPLY,
+            // type "error" lets the app show a Retry button and keeps this text out of the model's history
+            "messages.$[empty].type": "error",
             "messages.$[empty].updatedAt": new Date()
           }
         },

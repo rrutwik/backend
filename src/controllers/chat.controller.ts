@@ -137,15 +137,54 @@ export class ChatController {
         throw new Error('User not found');
       }
       const chatSessionUUID = req.params.id;
+      // Scoped to the signed-in user: without user_id any logged-in user could read any chat by uuid.
       const chatSession = await ChatSessionModel.findOne({
         uuid: chatSessionUUID,
+        user_id: user._id,
       }).populate({
         path: 'chatbot_id',
         select: 'name', // Specifies that only the 'name' field should be populated
       });
+      if (!chatSession) {
+        return res.status(404).json({ message: 'session not found' });
+      }
       return res.status(200).json({
         data: chatSession,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public renameChat = async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const user: User = req.user;
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 80) : '';
+      if (!name) {
+        return res.status(400).json({ message: 'name is required' });
+      }
+      const chatSession = await ChatSessionModel.findOneAndUpdate(
+        { uuid: req.params.id, user_id: user._id },
+        { $set: { name } },
+        { new: true, projection: { name: 1, uuid: 1, updatedAt: 1 } }
+      );
+      if (!chatSession) {
+        return res.status(404).json({ message: 'session not found' });
+      }
+      return res.status(200).json({ data: chatSession });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public deleteChat = async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const user: User = req.user;
+      const result = await ChatSessionModel.deleteOne({ uuid: req.params.id, user_id: user._id });
+      if (result.deletedCount === 0) {
+        return res.status(404).json({ message: 'session not found' });
+      }
+      return res.status(200).json({ message: 'deleted' });
     } catch (error) {
       next(error);
     }

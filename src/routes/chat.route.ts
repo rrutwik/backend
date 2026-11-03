@@ -17,5 +17,7 @@ export class ChatRoute implements Routes {
     this.router.get(`${this.path}/messages/:sessionId`, AuthMiddleware, this.chatController.getMessagesOfSession);
     this.router.get(`${this.path}`, AuthMiddleware, this.chatController.getChats);
     this.router.get(`${this.path}/:id`, AuthMiddleware, this.chatController.getChat);
+    this.router.patch(`${this.path}/:id`, AuthMiddleware, this.chatController.renameChat);
+    this.router.delete(`${this.path}/:id`, AuthMiddleware, this.chatController.deleteChat);
   }
 }
