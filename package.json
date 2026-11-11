@@ -42,7 +42,7 @@
     "lodash": "4.18.1",
     "lru-cache": "11.5.3",
     "moment-timezone": "0.6.0",
-    "mongoose": "8.24.1",
+    "mongoose": "8.24.7",
     "morgan": "1.12.1",
     "razorpay": "2.9.6",
     "reflect-metadata": "0.1.13",
